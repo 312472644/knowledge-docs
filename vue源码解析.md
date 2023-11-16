@@ -701,3 +701,428 @@ function removeNode (el) {
    如果上述情况匹配不到，则需要用旧节点key值去比对新节点key值，如果key值相同则复用，并将旧节点移动到新节点位置。
 ```
 
+### 模版编译
+
+所谓渲染流程，就是把用户写的类似于原生`HTML`的模板经过一系列处理最终反应到视图中称之为整个渲染流程。
+
+![img](https://vue-js.com/learn-vue/assets/img/1.f0570125.png)
+
+#### 具体流程
+
+将一堆字符串模板解析成抽象语法树`AST`后，我们就可以对其进行各种操作处理了，处理完后用处理后的`AST`来生成`render`函数。其具体流程可大致分为三个阶段：
+
+1. 模板解析阶段：将一堆模板字符串用正则等方式解析成抽象语法树`AST`；
+2. 优化阶段：遍历`AST`，找出其中的静态节点，并打上标记；
+3. 代码生成阶段：将`AST`转换成渲染函数；
+
+```javascript
+export const createCompiler = createCompilerCreator(function baseCompile (
+  template: string,
+  options: CompilerOptions
+): CompiledResult {
+  // 模板解析阶段：用正则等方式解析 template 模板中的指令、class、style等数据，形成AST
+  const ast = parse(template.trim(), options)
+  if (options.optimize !== false) {
+    // 优化阶段：遍历AST，找出其中的静态节点，并打上标记；
+    optimize(ast, options)
+  }
+  // 代码生成阶段：将AST转换成渲染函数；
+  const code = generate(ast, options)
+  return {
+    ast,
+    render: code.render,
+    staticRenderFns: code.staticRenderFns
+  }
+})
+```
+
+#### 模板解析阶段(整体运行流程)
+
+模板解析其实就是根据被解析内容的特点使用正则等方式将有效信息解析提取出来，根据解析内容的不同分为HTML解析器，文本解析器和过滤器解析器。而文本信息与过滤器信息又存在于HTML标签中，所以在解析器主线函数`parse`中先调用HTML解析器`parseHTML` 函数对模板字符串进行解析，如果在解析过程中遇到文本或过滤器信息则再调用相应的解析器进行解析，最终完成对整个模板字符串的解析。
+
+#### 模板解析阶段(HTML解析器)
+
+```javascript
+// 代码位置：/src/complier/parser/index.js
+
+/**
+ * Convert HTML string to AST.
+ * 将HTML模板字符串转化为AST
+ */
+export function parse(template, options) {
+   // ...
+  parseHTML(template, {
+    warn,
+    expectHTML: options.expectHTML,
+    isUnaryTag: options.isUnaryTag, // 是否为闭合标签
+    canBeLeftOpenTag: options.canBeLeftOpenTag,
+    shouldDecodeNewlines: options.shouldDecodeNewlines,
+    shouldDecodeNewlinesForHref: options.shouldDecodeNewlinesForHref,
+    shouldKeepComment: options.comments,
+    // 当解析到开始标签时，调用该函数
+    start (tag, attrs, unary) {
+
+    },
+    // 当解析到结束标签时，调用该函数
+    end () {
+
+    },
+    // 当解析到文本时，调用该函数
+    chars (text) {
+
+    },
+    // 当解析到注释时，调用该函数
+    comment (text) {
+
+    }
+  })
+  return root
+}
+```
+
+当解析到开始标签时调用`start`函数生成元素类型的`AST`节点，代码如下；
+
+```javascript
+// 当解析到标签的开始位置时，触发start
+start (tag, attrs, unary) {
+	let element = createASTElement(tag, attrs, currentParent)
+}
+
+export function createASTElement (tag,attrs,parent) {
+  return {
+    type: 1,
+    tag,
+    attrsList: attrs,
+    attrsMap: makeAttrsMap(attrs),
+    parent,
+    children: []
+  }
+}
+```
+
+当解析到结束标签时调用`end`函数；
+
+当解析到文本时调用`chars`函数生成文本类型的`AST`节点；
+
+```javascript
+// 当解析到标签的文本时，触发chars
+chars (text) {
+	if(text是带变量的动态文本){
+    let element = {
+      type: 2,
+      expression: res.expression,
+      tokens: res.tokens,
+      text
+    }
+  } else {
+    let element = {
+      type: 3,
+      text
+    }
+  }
+}
+```
+
+当解析到注释时调用`comment`函数生成注释类型的`AST`节点；
+
+```javascript
+// 当解析到标签的注释时，触发comment
+comment (text: string) {
+  let element = {
+    type: 3,
+    text,
+    isComment: true
+  }
+}
+```
+
+##### 如何解析不同的内容
+
+要从模板字符串中解析出不同的内容，那首先要知道模板字符串中都会包含哪些内容。那么通常我们所写的模板字符串中都会包含哪些内容呢？经过整理，通常模板内会包含如下内容：
+
+- 文本，例如“难凉热血”
+- HTML注释，例如<!-- 我是注释 -->
+- 条件注释，例如<!-- [if !IE]> -->我是注释<!--< ![endif] -->
+- DOCTYPE，例如<!DOCTYPE html>
+- 开始标签，例如<div>
+- 结束标签，例如</div>
+
+###### 解析HTML注释
+
+解析注释比较简单，我们知道`HTML`注释是以`<!--`开头，以`-->`结尾，这两者中间的内容就是注释内容，那么我们只需用正则判断待解析的模板字符串`html`是否以`<!--`开头，若是，那就继续向后寻找`-->`，如果找到了，OK，注释就被解析出来了。
+
+```javascript
+const comment = /^<!\--/
+if (comment.test(html)) {
+  // 若为注释，则继续查找是否存在'-->'
+  const commentEnd = html.indexOf('-->')
+
+  if (commentEnd >= 0) {
+    // 若存在 '-->',继续判断options中是否保留注释
+    if (options.shouldKeepComment) {
+      // 若保留注释，则把注释截取出来传给options.comment，创建注释类型的AST节点
+      options.comment(html.substring(4, commentEnd))
+    }
+    // 若不保留注释，则将游标移动到'-->'之后，继续向后解析
+    advance(commentEnd + 3)
+    continue
+  }
+}
+```
+
+###### 解析条件注释
+
+解析条件注释也比较简单，其原理跟解析注释相同，都是先用正则判断是否是以条件注释特有的开头标识开始，然后寻找其特有的结束标识，若找到，则说明是条件注释，将其截取出来即可，由于条件注释不存在于真正的`DOM`树中，所以不需要调用钩子函数创建`AST`节点。代码如下：
+
+```javascript
+// 解析是否是条件注释
+const conditionalComment = /^<!\[/
+if (conditionalComment.test(html)) {
+  // 若为条件注释，则继续查找是否存在']>'
+  const conditionalEnd = html.indexOf(']>')
+
+  if (conditionalEnd >= 0) {
+    // 若存在 ']>',则从原本的html字符串中把条件注释截掉，
+    // 把剩下的内容重新赋给html，继续向后匹配
+    advance(conditionalEnd + 2)
+    continue
+  }
+}
+```
+
+###### 解析DOCTYPE
+
+解析`DOCTYPE`的原理同解析条件注释完全相同，此处不再赘述，代码如下：
+
+```javascript
+const doctype = /^<!DOCTYPE [^>]+>/i
+// 解析是否是DOCTYPE
+const doctypeMatch = html.match(doctype)
+if (doctypeMatch) {
+  advance(doctypeMatch[0].length)
+  continue
+}
+```
+
+###### 解析开始标签
+
+首先使用开始标签的正则去匹配模板字符串，看模板字符串是否具有开始标签的特征，如下：
+
+```javascript
+/**
+ * 匹配开始标签的正则
+ */
+const ncname = '[a-zA-Z_][\\w\\-\\.]*'
+const qnameCapture = `((?:${ncname}\\:)?${ncname})`
+const startTagOpen = new RegExp(`^<${qnameCapture}`)
+
+const start = html.match(startTagOpen)
+if (start) {
+  const match = {
+    tagName: start[1],
+    attrs: [],
+    start: index
+  }
+}
+
+// 以开始标签开始的模板：
+'<div></div>'.match(startTagOpen)  => ['<div','div',index:0,input:'<div></div>']
+// 以结束标签开始的模板：
+'</div><div></div>'.match(startTagOpen) => null
+// 以文本开始的模板：
+'我是文本</p>'.match(startTagOpen) => null
+```
+
+###### 解析结束标签
+
+结束标签的解析要比解析开始标签容易多了，因为它不需要解析什么属性，只需要判断剩下的模板字符串是否符合结束标签的特征，如果是，就将结束标签名提取出来，再调用4个钩子函数中的`end`函数就好了。
+
+首先判断剩余的模板字符串是否符合结束标签的特征，如下：
+
+```javascript
+const ncname = '[a-zA-Z_][\\w\\-\\.]*'
+const qnameCapture = `((?:${ncname}\\:)?${ncname})`
+const endTag = new RegExp(`^<\\/${qnameCapture}[^>]*>`)
+const endTagMatch = html.match(endTag)
+
+'</div>'.match(endTag)  // ["</div>", "div", index: 0, input: "</div>", groups: undefined]
+'<div>'.match(endTag)  // null
+```
+
+###### 解析文本
+
+解析文本也比较容易，在解析模板字符串之前，我们先查找一下第一个`<`出现在什么位置，如果第一个`<`在第一个位置，那么说明模板字符串是以其它5种类型开始的；如果第一个`<`不在第一个位置而在模板字符串中间某个位置，那么说明模板字符串是以文本开头的，那么从开头到第一个`<`出现的位置就都是文本内容了；如果在整个模板字符串里没有找到`<`，那说明整个模板字符串都是文本。这就是解析思路，接下来我们对照源码来了解一下实际的解析过程，源码如下：
+
+```javascript
+let textEnd = html.indexOf('<')
+// '<' 在第一个位置，为其余5种类型
+if (textEnd === 0) {
+    // ...
+}
+// '<' 不在第一个位置，文本开头
+if (textEnd >= 0) {
+    // 如果html字符串不是以'<'开头,说明'<'前面的都是纯文本，无需处理
+    // 那就把'<'以后的内容拿出来赋给rest
+    rest = html.slice(textEnd)
+    while (
+        !endTag.test(rest) &&
+        !startTagOpen.test(rest) &&
+        !comment.test(rest) &&
+        !conditionalComment.test(rest)
+    ) {
+        // < in plain text, be forgiving and treat it as text
+        /**
+           * 用'<'以后的内容rest去匹配endTag、startTagOpen、comment、conditionalComment
+           * 如果都匹配不上，表示'<'是属于文本本身的内容
+           */
+        // 在'<'之后查找是否还有'<'
+        next = rest.indexOf('<', 1)
+        // 如果没有了，表示'<'后面也是文本
+        if (next < 0) break
+        // 如果还有，表示'<'是文本中的一个字符
+        textEnd += next
+        // 那就把next之后的内容截出来继续下一轮循环匹配
+        rest = html.slice(textEnd)
+    }
+    // '<'是结束标签的开始 ,说明从开始到'<'都是文本，截取出来
+    text = html.substring(0, textEnd)
+    advance(textEnd)
+}
+// 整个模板字符串里没有找到`<`,说明整个模板字符串都是文本
+if (textEnd < 0) {
+    text = html
+    html = ''
+}
+// 把截取出来的text转化成textAST
+if (options.chars && text) {
+    options.chars(text)
+}
+```
+
+##### 如何保证AST节点层级关系
+
+`Vue`在`HTML`解析器的开头定义了一个栈`stack`，这个栈的作用就是用来维护`AST`节点层级的，那么它是怎么维护的呢？通过前文我们知道，`HTML`解析器在从前向后解析模板字符串时，每当遇到开始标签时就会调用`start`钩子函数，那么在`start`钩子函数内部我们可以将解析得到的开始标签推入栈中，而每当遇到结束标签时就会调用`end`钩子函数，那么我们也可以在`end`钩子函数内部将解析得到的结束标签所对应的开始标签从栈中弹出。
+
+```html
+<div><p><span></span></p></div>
+```
+
+
+
+![img](https://vue-js.com/learn-vue/assets/img/7.6ca1dbf0.png)
+
+这样我们就找到了当前被构建节点的父节点。这只是栈的一个用途，它还有另外一个用途，我们再看如下模板字符串：
+
+```html
+<div><p><span></p></div>
+```
+
+按照上面的流程解析这个模板字符串时，当解析到结束标签`</p>`时，此时栈顶的标签应该是`p`才对，而现在是`span`，那么就说明`span`标签没有被正确闭合，此时控制台就会抛出警告：‘tag has no matching end tag.’相信这个警告你一定不会陌生。这就是栈的第二个用途： 检测模板字符串中是否有未正确闭合的标签。
+
+#### 模板解析阶段(文本解析器)
+
+```javascript
+// 当解析到标签的文本时，触发chars
+chars (text) {
+  if(res = parseText(text)){
+       let element = {
+           type: 2,
+           expression: res.expression,
+           tokens: res.tokens,
+           text
+       }
+    } else {
+       let element = {
+           type: 3,
+           text
+       }
+    }
+}
+```
+
+文本解析器内部就干了三件事：
+
+- 判断传入的文本是否包含变量
+- 构造expression
+- 构造tokens
+
+
+
+#### 优化阶段
+
+优化阶段其实就干了两件事：
+
+1. 在`AST`中找出所有静态节点并打上标记；
+2. 在`AST`中找出所有静态根节点并打上标记；
+
+```javascript
+export function optimize (root: ?ASTElement, options: CompilerOptions) {
+  if (!root) return
+  isStaticKey = genStaticKeysCached(options.staticKeys || '')
+  isPlatformReservedTag = options.isReservedTag || no
+  // 标记静态节点
+  markStatic(root)
+  // 标记静态根节点
+  markStaticRoots(root, false)
+}
+```
+
+###### 标记静态节点
+
+判断是否为静态节点：
+
+```javascript
+function isStatic (node: ASTNode): boolean {
+  if (node.type === 2) { // 包含变量的动态文本节点
+    return false
+  }
+  if (node.type === 3) { // 不包含变量的纯文本节点
+    return true
+  }
+  return !!(node.pre || (
+    !node.hasBindings && // no dynamic bindings
+    !node.if && !node.for && // not v-if or v-for or v-else
+    !isBuiltInTag(node.tag) && // not a built-in
+    isPlatformReservedTag(node.tag) && // not a component
+    !isDirectChildOfTemplateFor(node) &&
+    Object.keys(node).every(isStaticKey)
+  ))
+}
+```
+
+如果元素节点是静态节点，那就必须满足以下几点要求：
+
+- 如果节点使用了`v-pre`指令，那就断定它是静态节点；
+- 如果节点没有使用`v-pre`指令，那它要成为静态节点必须满足：
+  - 不能使用动态绑定语法，即标签上不能有`v-`、`@`、`:`开头的属性；
+  - 不能使用`v-if`、`v-else`、`v-for`指令；
+  - 不能是内置组件，即标签名不能是`slot`和`component`；
+  - 标签名必须是平台保留标签，即不能是组件；
+  - 当前节点的父节点不能是带有 `v-for` 的 `template` 标签；
+  - 节点的所有属性的 `key` 都必须是静态节点才有的 `key`，注：静态节点的`key`是有限的，它只能是`type`,`tag`,`attrsList`,`attrsMap`,`plain`,`parent`,`children`,`attrs`之一；
+
+###### 标记静态根节点
+
+判断是否为静态根节点：
+
+```javascript
+// For a node to qualify as a static root, it should have children that
+// are not just static text. Otherwise the cost of hoisting out will
+// outweigh the benefits and it's better off to just always render it fresh.
+// 为了使节点有资格作为静态根节点，它应具有不只是静态文本的子节点。 否则，优化的成本将超过收益，最好始终将其更新。
+if (node.static && node.children.length && !(
+    node.children.length === 1 &&
+    node.children[0].type === 3
+)) {
+    node.staticRoot = true
+    return
+} else {
+    node.staticRoot = false
+}
+```
+
+一个节点要想成为静态根节点，它必须满足以下要求：
+
+- 节点本身必须是静态节点；
+- 必须拥有子节点 `children`；
+- 子节点不能只是只有一个文本节点；
