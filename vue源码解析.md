@@ -1,4 +1,4 @@
-### **变化侦测篇**
+### **1、变化侦测篇**
 
 #### Object的变化侦测
 
@@ -483,7 +483,7 @@ arr.length = 0    // 通过修改数组长度清空数组
 
 而使用上述例子中的操作方式来修改数组是无法侦测到的。 同样，`Vue`也注意到了这个问题， 为了解决这一问题，`Vue`增加了两个全局API:`Vue.set`和`Vue.delete`。
 
-### 虚拟DOM
+### 2、虚拟DOM
 
 #### Vue中的虚拟DOM
 
@@ -701,7 +701,7 @@ function removeNode (el) {
    如果上述情况匹配不到，则需要用旧节点key值去比对新节点key值，如果key值相同则复用，并将旧节点移动到新节点位置。
 ```
 
-### 模版编译
+### 3、模版编译
 
 所谓渲染流程，就是把用户写的类似于原生`HTML`的模板经过一系列处理最终反应到视图中称之为整个渲染流程。
 
@@ -1106,9 +1106,6 @@ function isStatic (node: ASTNode): boolean {
 判断是否为静态根节点：
 
 ```javascript
-// For a node to qualify as a static root, it should have children that
-// are not just static text. Otherwise the cost of hoisting out will
-// outweigh the benefits and it's better off to just always render it fresh.
 // 为了使节点有资格作为静态根节点，它应具有不只是静态文本的子节点。 否则，优化的成本将超过收益，最好始终将其更新。
 if (node.static && node.children.length && !(
     node.children.length === 1 &&
@@ -1126,3 +1123,500 @@ if (node.static && node.children.length && !(
 - 节点本身必须是静态节点；
 - 必须拥有子节点 `children`；
 - 子节点不能只是只有一个文本节点；
+
+
+
+### 4、生命周期
+
+下图是`Vue`官网给出的`Vue`实例的生命周期流程图，如下：
+
+<img src="https://vue-js.com/learn-vue/assets/img/1.6e1e57be.jpg" alt="img" style="zoom: 67%;" />
+
+`Vue`实例的生命周期大致可分为4个阶段：
+
+- 初始化阶段：为`Vue`实例上初始化一些属性，事件以及响应式数据；
+- 模板编译阶段：将模板编译成渲染函数；
+- 挂载阶段：将实例挂载到指定的`DOM`上，即将模板渲染到真实`DOM`中；
+- 销毁阶段：将实例自身从父组件中删除，并取消依赖追踪及事件监听器；
+
+#### 初始化阶段(new Vue)
+
+合并配置，调用一些初始化函数，触发生命周期钩子函数，调用`$mount`开启下一个阶段。
+
+```javascript
+function Vue (options) {
+  if (process.env.NODE_ENV !== 'production' &&
+    !(this instanceof Vue)
+  ) {
+    warn('Vue is a constructor and should be called with the `new` keyword')
+  }
+  this._init(options) // 执行的是Vue原型上
+}
+
+// Vue类的原型上绑定_init方法
+export function initMixin (Vue) {
+  Vue.prototype._init = function (options) {
+    const vm = this
+    // 用户传递的options选项与当前构造函数的options属性及其父级构造函数的options属性进行合并
+    vm.$options = mergeOptions(
+        resolveConstructorOptions(vm.constructor),
+        options || {},
+        vm
+    )
+    vm._self = vm
+    initLifecycle(vm)       // 初始化生命周期
+    initEvents(vm)        // 初始化事件
+    initRender(vm)         // 初始化渲染
+    callHook(vm, 'beforeCreate')  // 调用生命周期钩子函数
+    initInjections(vm)   //初始化injections
+    initState(vm)    // 初始化props,methods,data,computed,watch
+    initProvide(vm) // 初始化 provide
+    callHook(vm, 'created')  // 调用生命周期钩子函数
+
+    if (vm.$options.el) {
+      vm.$mount(vm.$options.el)
+    }
+  }
+}
+```
+
+##### 合并属性
+
+它实际上就是把 `resolveConstructorOptions(vm.constructor)` 的返回值和 `options` 做合并，`resolveConstructorOptions` 的实现先不考虑，可简单理解为返回 `vm.constructor.options`，相当于 `Vue.options`。
+
+```javascript
+vm.$options = mergeOptions(
+    resolveConstructorOptions(vm.constructor),
+    options || {},
+    vm
+)
+
+export function initGlobalAPI (Vue: GlobalAPI) {
+  // 获取Vue默认配置
+  Vue.options = Object.create(null)
+  ASSET_TYPES.forEach(type => {
+    Vue.options[type + 's'] = Object.create(null)
+  })
+
+  // 置组件扩展到 Vue.options.components 上，Vue 的内置组件目前 有<keep-alive>、<transition> 和<transition-group> 组件，这也就是为什么我们在其它组件中使用这些组件不需要注册的原因。
+  extend(Vue.options.components, builtInComponents)
+  // ...
+}
+```
+
+`mergeOptions`函数的 主要功能是把 `parent` 和 `child` 这两个对象根据一些合并策略，合并成一个新对象并返回。首先递归把 `extends` 和 `mixins` 合并到 `parent` 上，然后创建一个空对象`options`，遍历 `parent`，把`parent`中的每一项通过调用 `mergeField`函数合并到空对象`options`里，接着再遍历 `child`，把存在于`child`里但又不在 `parent`中 的属性继续调用 `mergeField`函数合并到空对象`options`里，
+
+```javascript
+/**
+ * Merge two option objects into a new one.
+ * Core utility used in both instantiation and inheritance.
+ */
+export function mergeOptions (
+  parent: Object,
+  child: Object,
+  vm?: Component
+): Object {
+
+  if (typeof child === 'function') {
+    child = child.options
+  }
+  const extendsFrom = child.extends
+  if (extendsFrom) {
+    parent = mergeOptions(parent, extendsFrom, vm)
+  }
+  if (child.mixins) {
+    for (let i = 0, l = child.mixins.length; i < l; i++) {
+      parent = mergeOptions(parent, child.mixins[i], vm)
+    }
+  }
+  const options = {}
+  let key
+  for (key in parent) {
+    mergeField(key)
+  }
+  for (key in child) {
+    if (!hasOwn(parent, key)) {
+      mergeField(key)
+    }
+  }
+  function mergeField (key) {
+    const strat = strats[key] || defaultStrat
+    options[key] = strat(parent[key], child[key], vm, key)
+  }
+  return options
+}
+```
+
+生命周期钩子函数的合并策略如下：
+
+```javascript
+
+/**
+ * Hooks and props are merged as arrays.
+ */
+// 如果 childVal不存在，就返回 parentVal；否则再判断是否存在 parentVal，如果存在就把 childVal 添加到 parentVal 后返回新数组；否则返回 childVal 的数组。所以回到 mergeOptions 函数，一旦 parent 和 child 都定义了相同的钩子函数，那么它们会把 2 个钩子函数合并成一个数组。合并为数组是为了后面Vue.mixin用户自定义合并。
+function mergeHook (parentVal,childVal):  {
+  return childVal
+    ? parentVal
+      ? parentVal.concat(childVal)
+      : Array.isArray(childVal)
+        ? childVal
+        : [childVal]
+    : parentVal
+}
+
+LIFECYCLE_HOOKS.forEach(hook => {
+  strats[hook] = mergeHook
+})
+
+export const LIFECYCLE_HOOKS = [
+  'beforeCreate',
+  'created',
+  'beforeMount',
+  'mounted',
+  'beforeUpdate',
+  'updated',
+  'beforeDestroy',
+  'destroyed',
+  'activated',
+  'deactivated',
+  'errorCaptured'
+]
+```
+
+#### callHook函数如何触发钩子函数
+
+`callHook`函数逻辑非常简单。首先从实例的`$options`中获取到需要触发的钩子名称所对应的钩子函数数组`handlers`，我们说过，每个生命周期钩子名称都对应了一个钩子函数数组。然后遍历该数组，将数组中的每个钩子函数都执行一遍。
+
+```javascript
+export function callHook (vm: Component, hook: string) {
+  const handlers = vm.$options[hook]
+  if (handlers) {
+    for (let i = 0, j = handlers.length; i < j; i++) {
+      try {
+        handlers[i].call(vm)
+      } catch (e) {
+        handleError(e, vm, `${hook} hook`)
+      }
+    }
+  }
+}
+```
+
+#### 初始化阶段(initLifecycle)【生命周期】
+
+主要是给`Vue`实例上挂载了一些属性并设置了默认值。
+
+```javascript
+export function initLifecycle (vm: Component) {
+  const options = vm.$options
+
+  // 如果当前组件不是抽象组件并且存在父级，那么就通过while循环来向上循环，如果当前组件的父级是抽象组件并且也存在父级，那就继续向上查找当前组件父级的父级，直到找到第一个不是抽象类型的父级时，将其赋值vm.$parent，同时把该实例自身添加进找到的父级的$children属性中。这样就确保了在子组件的$parent属性上能访问到父组件实例，在父组件的$children属性上也能访问子组件的实例。
+  let parent = options.parent
+  if (parent && !options.abstract) {
+    while (parent.$options.abstract && parent.$parent) {
+      parent = parent.$parent
+    }
+    parent.$children.push(vm)
+  }
+
+  vm.$parent = parent
+  // 首先会判断如果当前实例存在父级，那么当前实例的根实例$root属性就是其父级的根实例$root属性，如果不存在，那么根实例$root属性就是它自己。
+  vm.$root = parent ? parent.$root : vm
+
+  vm.$children = []
+  vm.$refs = {}
+
+  vm._watcher = null
+  vm._inactive = null
+  vm._directInactive = false
+  vm._isMounted = false
+  vm._isDestroyed = false
+  vm._isBeingDestroyed = false
+}
+```
+
+#### 初始化阶段(initEvents)【事件绑定】
+
+##### 解析事件
+
+```javascript
+export const onRE = /^@|^v-on:/
+export const dirRE = /^v-|^@|^:/
+
+function processAttrs (el) {
+  const list = el.attrsList
+  let i, l, name, value, modifiers
+  for (i = 0, l = list.length; i < l; i++) {
+    name  = list[i].name
+    value = list[i].value
+    if (dirRE.test(name)) {
+      // 解析修饰符
+      modifiers = parseModifiers(name)
+      if (modifiers) {
+        name = name.replace(modifierRE, '')
+      }
+      if (onRE.test(name)) { // v-on
+        name = name.replace(onRE, '')
+        addHandler(el, name, value, modifiers, false, warn)
+      }
+    }
+  }
+}
+```
+
+首先根据 `modifier` 修饰符对事件名 `name` 做处理，接着根据 `modifier.native` 判断事件是一个浏览器原生事件还是自定义事件，分别对应 `el.nativeEvents` 和 `el.events`，最后按照 `name` 对事件做归类，并把回调函数的字符串保留到对应的事件中。
+
+```javascript
+export function addHandler (el,name,value,modifiers) {
+  modifiers = modifiers || emptyObject
+
+  // check capture modifier 判断是否有capture修饰符
+  if (modifiers.capture) {
+    delete modifiers.capture
+    name = '!' + name // 给事件名前加'!'用以标记capture修饰符
+  }
+  // 判断是否有once修饰符
+  if (modifiers.once) {
+    delete modifiers.once
+    name = '~' + name // 给事件名前加'~'用以标记once修饰符
+  }
+  // 判断是否有passive修饰符
+  if (modifiers.passive) {
+    delete modifiers.passive
+    name = '&' + name // 给事件名前加'&'用以标记passive修饰符
+  }
+
+  let events
+  if (modifiers.native) {
+    delete modifiers.native
+    events = el.nativeEvents || (el.nativeEvents = {})
+  } else {
+    events = el.events || (el.events = {})
+  }
+
+  const newHandler: any = {
+    value: value.trim()
+  }
+  if (modifiers !== emptyObject) {
+    newHandler.modifiers = modifiers
+  }
+
+  const handlers = events[name]
+  if (Array.isArray(handlers)) {
+    handlers.push(newHandler)
+  } else if (handlers) {
+    events[name] = [handlers, newHandler]
+  } else {
+    events[name] = newHandler
+  }
+
+  el.plain = false
+}
+```
+
+然后在模板编译的代码生成阶段，会在 `genData` 函数中根据 `AST` 元素节点上的 `events` 和 `nativeEvents` 生成`_c(tagName,data,children)`函数中所需要的 `data` 数据。
+
+```javascript
+export function genData (el state) {
+  let data = '{'
+  // ...
+  if (el.events) {
+    data += `${genHandlers(el.events, false,state.warn)},`
+  }
+  if (el.nativeEvents) {
+    data += `${genHandlers(el.nativeEvents, true, state.warn)},`
+  }
+  // ...
+  return data
+}
+
+// 生成的data数据如下：
+{
+  // ...
+  on: {"select": selectHandler}, // 自定义事件
+  nativeOn: {"click": function($event) { // 原生事件
+      return clickHandler($event)
+    }
+  }
+  // ...
+}
+```
+
+模板编译的最终目的是创建`render`函数供挂载的时候调用生成虚拟`DOM`，那么在挂载阶段， 如果被挂载的节点是一个组件节点，则通过 `createComponent` 函数创建一个组件 `vnode`。
+
+```javascript
+export function createComponent (
+  Ctor: Class<Component> | Function | Object | void,
+  data: ?VNodeData,
+  context: Component,
+  children: ?Array<VNode>,
+  tag?: string
+): VNode | Array<VNode> | void {
+  // ...
+  const listeners = data.on
+
+  data.on = data.nativeOn
+
+  // ...
+  const name = Ctor.options.name || tag
+  const vnode = new VNode(
+    `vue-component-${Ctor.cid}${name ? `-${name}` : ''}`,
+    data, undefined, undefined, undefined, context,
+    { Ctor, propsData, listeners, tag, children },
+    asyncFactory
+  )
+
+  return vnode
+}
+```
+
+父组件给子组件的注册事件中，把自定义事件传给子组件，在子组件实例化的时候进行初始化；而浏览器原生事件是在父组件中处理。
+
+##### initEvents函数分析
+
+`initEvents`函数逻辑非常简单，首先在`vm`上新增`_events`属性并将其赋值为空对象，用来存储事件。接着，获取父组件注册的事件赋给`listeners`，如果`listeners`不为空，则调用`updateComponentListeners`函数，将父组件向子组件注册的事件注册到子组件的实例中。
+
+```javascript
+export function initEvents (vm: Component) {
+  vm._events = Object.create(null)
+  // init parent attached events
+  const listeners = vm.$options._parentListeners
+  if (listeners) {
+    updateComponentListeners(vm, listeners)
+  }
+}
+```
+
+父组件既可以给子组件上绑定自定义事件，也可以绑定浏览器原生事件。这两种事件有着不同的处理时机，浏览器原生事件是由父组件处理，而自定义事件是在子组件初始化的时候由父组件传给子组件，再由子组件注册到实例的事件系统中。
+
+也就是说：**初始化事件函数initEvents实际上初始化的是父组件在模板中使用v-on或@注册的监听子组件内触发的事件。**
+
+最后分析了`initEvents`函数的具体实现过程，该函数内部首先在实例上新增了`_events`属性并将其赋值为空对象，用来存储事件。接着通过调用`updateComponentListeners`函数，将父组件向子组件注册的事件注册到子组件实例中的`_events`对象里。
+
+
+
+#### 初始化阶段(initInjections) 【依赖注入】
+
+这里所说的数据就是我们通常所写`data`、`props`、`watch`、`computed`及`method`，所以`inject`选项接收到注入的值有可能被以上这些数据所使用到，所以在初始化完`inject`后需要先初始化这些数据，然后才能再初始化`provide`，所以在调用`initInjections`函数对`inject`初始化完之后需要先调用`initState`函数对数据进行初始化，最后再调用`initProvide`函数对`provide`进行初始化。
+
+```javascript
+// initInjections函数的逻辑并不复杂，首先调用resolveInject把inject选项中的数据转化成键值对的形式赋给result
+export function initInjections (vm: Component) {
+  const result = resolveInject(vm.$options.inject, vm)
+  // 在把result中的键值添加到当前实例上之前，会先调用toggleObserving(false)，而这个函数内部是把shouldObserve = false，这是为了告诉defineReactive函数仅仅是把键值添加到当前实例上而不需要将其转换成响应式。provide 和 inject 绑定并不是可响应的。这是刻意为之的。然而，如果你传入了一个可监听的对象，那么其对象的'属性'还是可响应的。
+  if (result) {
+    toggleObserving(false)
+    Object.keys(result).forEach(key => {
+      defineReactive(vm, key, result[key])
+    }
+    toggleObserving(true)
+  }
+}
+
+export let shouldObserve: boolean = true
+export function toggleObserving (value: boolean) {
+  shouldObserve = value
+}
+```
+
+##### resolveInject函数分析
+
+`inject` 选项中的每一个数据`key`都是由其上游父级组件提供的，所以我们应该把每一个数据`key`从当前组件起，不断的向上游父级组件中查找该数据`key`对应的值，直到找到为止。如果在上游所有父级组件中没找到，那么就看在`inject` 选项是否为该数据`key`设置了默认值，如果设置了就使用默认值，如果没有设置，则抛出异常。
+
+```javascript
+export function resolveInject (inject: any, vm: Component): ?Object {
+  if (inject) {
+    const result = Object.create(null)
+    const keys =  Object.keys(inject)
+
+    // 然后获取当前inject 选项中的所有key，然后遍历每一个key，拿到每一个key的from属性记作provideKey，provideKey就是上游父级组件提供的源属性，然后	开启一个while循环，从当前组件起，不断的向上游父级组件的_provided属性中（父级组件使用provide选项注入数据时会将注入的数据存入自己的实例的_provided		属性中）查找，直到查找到源属性的对应的值，将其存入result中，
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i]
+      const provideKey = inject[key].from
+      let source = vm
+      while (source) {
+        if (source._provided && hasOwn(source._provided, provideKey)) {
+          result[key] = source._provided[provideKey]
+          break
+        }
+        source = source.$parent
+      }
+      // 如果没有找到，那么就看inject 选项中当前的数据key是否设置了默认值，即是否有default属性，如果有的话，则拿到这个默认值
+      if (!source) {
+        if ('default' in inject[key]) {
+          const provideDefault = inject[key].default
+          result[key] = typeof provideDefault === 'function'
+            ? provideDefault.call(vm)
+            : provideDefault
+        } else if (process.env.NODE_ENV !== 'production') {
+          warn(`Injection "${key}" not found`, vm)
+        }
+      }
+    }
+    return result
+  }
+}
+```
+
+`inject`选项的规范化函数`normalizeInject`也进行了分析，`Vue`为用户提供了自由多种的写法，其内部是将各种写法最后进行统一规范化处理。
+
+```javascript
+function normalizeInject (options: Object, vm: ?Component) {
+  const inject = options.inject
+  if (!inject) return
+  const normalized = options.inject = {}
+  if (Array.isArray(inject)) {
+    for (let i = 0; i < inject.length; i++) {
+      normalized[inject[i]] = { from: inject[i] }
+    }
+  } else if (isPlainObject(inject)) {
+    for (const key in inject) {
+      const val = inject[key]
+      normalized[key] = isPlainObject(val)
+        ? extend({ from: key }, val)
+        : { from: val }
+    }
+  } else if (process.env.NODE_ENV !== 'production') {
+    warn(
+      `Invalid value for option "inject": expected an Array or an Object, ` +
+      `but got ${toRawType(inject)}.`,
+      vm
+    )
+  }
+}
+```
+
+#### 初始化阶段(initState) 【属性】
+
+##### initState函数分析
+
+```javascript
+export function initState (vm: Component) {
+  vm._watchers = []
+  const opts = vm.$options
+  if (opts.props) initProps(vm, opts.props)
+  if (opts.methods) initMethods(vm, opts.methods)
+  if (opts.data) {
+    initData(vm)
+  } else {
+    observe(vm._data = {}, true /* asRootData */)
+  }
+  if (opts.computed) initComputed(vm, opts.computed)
+  if (opts.watch && opts.watch !== nativeWatch) {
+    initWatch(vm, opts.watch)
+  }
+}
+```
+
+生命周期初始化阶段所调用的第五个初始化函数——`initState`。该初始化函数内部总共初始化了5个选项，分别是：`props`、`methods`、`data`、`computed`和`watch`。
+
+这5个选项的初始化顺序不是任意的，而是经过精心安排的。只有按照这种顺序初始化我们才能在开发中在`data`中可以使用`props`，在`watch`中可以观察`data`和`props`。
+
+这5个选项中的所有属性最终都会被绑定到实例上，这也就是我们为什么可以使用`this.xxx`来访问任意属性。同时正是因为这一点，这5个选项中的所有属性名都不应该有所重复，这样会造成属性之间相互覆盖。
+
+#### 模板编译阶段
+
+#### 挂载阶段
+
+#### 销毁阶段
