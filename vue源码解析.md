@@ -1609,6 +1609,591 @@ export function initState (vm: Component) {
 }
 ```
 
+##### 初始化props
+
+在子组件内部，通过`props`选项来接收父组件传来的数据，在接收的时候可以这样写：
+
+```js
+// 写法一
+props: ['name']
+
+// 写法二
+props: {
+    name: String, // [String, Number]
+}
+
+// 写法三
+props: {
+    name:{
+		type: String
+    }
+}
+```
+
+Vue给用户提供的props选项写法非常自由，根据Vue的惯例，写法虽多但是最终处理的时候肯定只处理一种写法。规范化属性数据代码如下：
+
+```js
+function normalizeProps (options, vm) {
+  const props = options.props
+  if (!props) return
+  const res = {}
+  let i, val, name
+  if (Array.isArray(props)) {
+    i = props.length
+    while (i--) {
+      val = props[i]
+      if (typeof val === 'string') {
+        name = camelize(val)
+        res[name] = { type: null }
+      } else if (process.env.NODE_ENV !== 'production') {
+        warn('props must be strings when using array syntax.')
+      }
+    }
+  } else if (isPlainObject(props)) {
+    for (const key in props) {
+      val = props[key]
+      name = camelize(key)
+      res[name] = isPlainObject(val)
+        ? val
+        : { type: val }
+    }
+  } else if (process.env.NODE_ENV !== 'production') {
+    warn(
+      `Invalid value for option "props": expected an Array or an Object, ` +
+      `but got ${toRawType(props)}.`,
+      vm
+    )
+  }
+  options.props = res
+}
+```
+
+###### initProps函数分析
+
+```js
+function initProps (vm: Component, propsOptions: Object) {
+  // 父组件传入的真实props数据
+  const propsData = vm.$options.propsData || {}
+  // vm._props的指针，所有设置到props变量中的属性都会保存到vm._props中。
+  const props = vm._props = {}
+  // 指向vm.$options._propKeys的指针，缓存props对象中的key，将来更新props时只需遍历vm.$options._propKeys数组即可得到所有props的key。
+  const keys = vm.$options._propKeys = []
+  // 当前组件是否为根组件。
+  const isRoot = !vm.$parent
+  // root instance props should be converted
+  if (!isRoot) {
+    toggleObserving(false)
+  }
+  // 遍历props选项拿到每一对键值，先将键名添加到keys中，然后调用validateProp函数（关于该函数下面会介绍）校验父组件传入的props数据类型是否匹配并获取到传入的值value，然后将键和值通过defineReactive函数添加到props（即vm._props）中
+  for (const key in propsOptions) {
+    keys.push(key)
+    const value = validateProp(key, propsOptions, propsData, vm)
+    /* istanbul ignore else */
+    if (process.env.NODE_ENV !== 'production') {
+      const hyphenatedKey = hyphenate(key)
+      if (isReservedAttribute(hyphenatedKey) ||
+          config.isReservedAttr(hyphenatedKey)) {
+        warn(
+          `"${hyphenatedKey}" is a reserved attribute and cannot be used as component prop.`,
+          vm
+        )
+      }
+      defineReactive(props, key, value, () => {
+        if (vm.$parent && !isUpdatingChildComponent) {
+          warn(
+            `Avoid mutating a prop directly since the value will be ` +
+            `overwritten whenever the parent component re-renders. ` +
+            `Instead, use a data or computed property based on the prop's ` +
+            `value. Prop being mutated: "${key}"`,
+            vm
+          )
+        }
+      })
+    } else {
+      defineReactive(props, key, value)
+    }
+    // 添加完之后再判断这个key在当前实例vm中是否存在，如果不存在，则调用proxy函数在vm上设置一个以key为属性的代码，当使用vm[key]访问数据时，其实访问的是vm._props[key]
+    if (!(key in vm)) {
+      proxy(vm, `_props`, key)
+    }
+  }
+  toggleObserving(true)
+}
+```
+
+###### validateProp函数分析
+
+```js
+/*
+* 校验传入属性是否符合要求
+*
+* key 遍历propOptions时拿到的每个属性名。
+* propOptions 当前实例规范化后的props选项。
+* propsData 父组件传入的真实props数据。
+* vm 当前实例。
+*/
+export function validateProp (key,propOptions,propsData,vm) {
+  const prop = propOptions[key]
+  const absent = !hasOwn(propsData, key)
+  let value = propsData[key]
+  // boolean casting
+  const booleanIndex = getTypeIndex(Boolean, prop.type)
+  if (booleanIndex > -1) {
+    if (absent && !hasOwn(prop, 'default')) {
+      value = false
+    } else if (value === '' || value === hyphenate(key)) {
+      // only cast empty string / same name to boolean if
+      // boolean has higher priority
+      const stringIndex = getTypeIndex(String, prop.type)
+      if (stringIndex < 0 || booleanIndex < stringIndex) {
+        value = true
+      }
+    }
+  }
+  // check default value
+  if (value === undefined) {
+    value = getPropDefaultValue(vm, prop, key)
+    // since the default value is a fresh copy,
+    // make sure to observe it.
+    const prevShouldObserve = shouldObserve
+    toggleObserving(true)
+    observe(value)
+    toggleObserving(prevShouldObserve)
+  }
+  if (process.env.NODE_ENV !== 'production') {
+    assertProp(prop, key, value, vm, absent)
+  }
+  return value
+}
+```
+
+###### getPropDefaultValue函数分析
+
+```js
+/**
+* 其作用是根据子组件props选项中的key获取其对应的默认值。
+* vm 当前实例；
+* prop 子组件props选项中的每个key对应的值；
+* key 子组件props选项中的每个key；
+*/
+function getPropDefaultValue (vm, prop, key){
+  // no default, return undefined
+  if (!hasOwn(prop, 'default')) {
+    return undefined
+  }
+  const def = prop.default
+  // warn against non-factory defaults for Object & Array
+  if (process.env.NODE_ENV !== 'production' && isObject(def)) {
+    warn(
+      'Invalid default value for prop "' + key + '": ' +
+      'Props with type Object/Array must use a factory function ' +
+      'to return the default value.',
+      vm
+    )
+  }
+  // the raw prop value was also undefined from previous render,
+  // return previous default value to avoid unnecessary watcher trigger
+  if (vm && vm.$options.propsData &&
+    vm.$options.propsData[key] === undefined &&
+    vm._props[key] !== undefined
+  ) {
+    return vm._props[key]
+  }
+  // call factory function for non-Function types
+  // a value is Function if its prototype is function even across different execution context
+  return typeof def === 'function' && getType(prop.type) !== 'Function'
+    ? def.call(vm)
+    : def
+}
+```
+
+###### assertProp函数分析
+
+```js
+/*
+* 其作用是校验父组件传来的真实值是否与prop的type类型相匹配，如果不匹配则在非生产环境下抛出警告。
+* prop prop:prop选项;
+* name:props中prop选项的key;
+* value:父组件传入的propsData中key对应的真实数据；
+* vm:当前实例；
+* absent:当前key是否在propsData中存在，即父组件是否传入了该属性。
+*/
+function assertProp (prop,name,value,vm,absent) {
+  if (prop.required && absent) {
+    warn(
+      'Missing required prop: "' + name + '"',
+      vm
+    )
+    return
+  }
+  if (value == null && !prop.required) {
+    return
+  }
+  let type = prop.type
+  let valid = !type || type === true
+  const expectedTypes = []
+  if (type) {
+    if (!Array.isArray(type)) {
+      type = [type]
+    }
+    for (let i = 0; i < type.length && !valid; i++) {
+      const assertedType = assertType(value, type[i])
+      expectedTypes.push(assertedType.expectedType || '')
+      valid = assertedType.valid
+    }
+  }
+  if (!valid) {
+    warn(
+      `Invalid prop: type check failed for prop "${name}".` +
+      ` Expected ${expectedTypes.map(capitalize).join(', ')}` +
+      `, got ${toRawType(value)}.`,
+      vm
+    )
+    return
+  }
+  const validator = prop.validator
+  if (validator) {
+    if (!validator(value)) {
+      warn(
+        'Invalid prop: custom validator check failed for prop "' + name + '".',
+        vm
+      )
+    }
+  }
+}
+```
+
+##### 初始化methods
+
+```js
+function initMethods (vm, methods) {
+  const props = vm.$options.props
+  for (const key in methods) {
+    if (process.env.NODE_ENV !== 'production') {
+      // 遍历methods选项中的每一个对象，在非生产环境下判断如果methods中某个方法只有key而没有value，即只有方法名没有方法体时，抛出异常：提示用户方法未定义。
+      if (methods[key] == null) {
+        warn(
+          `Method "${key}" has an undefined value in the component definition. ` +
+          `Did you reference the function correctly?`,
+          vm
+        )
+      }
+      // 如果methods中某个方法名与props中某个属性名重复了，就抛出异常：提示用户方法名重复了。
+      if (props && hasOwn(props, key)) {
+        warn(
+          `Method "${key}" has already been defined as a prop.`,
+          vm
+        )
+      }
+      // 如果methods中某个方法名如果在实例vm中已经存在并且方法名是以_或$开头的，就抛出异常：提示用户方法名命名不规范。
+      if ((key in vm) && isReserved(key)) {
+        warn(
+          `Method "${key}" conflicts with an existing Vue instance method. ` +
+          `Avoid defining component methods that start with _ or $.`
+        )
+      }
+    }
+    vm[key] = methods[key] == null ? noop : bind(methods[key], vm)
+  }
+}
+```
+
+##### 初始化data
+
+```js
+function initData (vm) {
+    let data = vm.$options.data
+    // 获取到用户传入的data选项，赋给变量data，同时将变量data作为指针指向vm._data，然后判断data是不是一个函数，如果是就调用getData函数获取其返回值，将其保存到vm._data中。如果不是，就将其本身保存到vm._data中
+    data = vm._data = typeof data === 'function'
+        ? getData(data, vm)
+    : data || {}
+    if (!isPlainObject(data)) {
+        data = {}
+        process.env.NODE_ENV !== 'production' && warn(
+            'data functions should return an object:\n' +
+            'https://vuejs.org/v2/guide/components.html##data-Must-Be-a-Function',
+            vm
+        )
+    }
+    // proxy data on instance
+    const keys = Object.keys(data)
+    const props = vm.$options.props
+    const methods = vm.$options.methods
+    let i = keys.length
+    while (i--) {
+        const key = keys[i]
+        // data对象中的每一项，在非生产环境下判断data对象中是否存在某一项的key与methods中某个属性名重复，如果存在重复，就抛出警告：提示用户属性名重复。
+        if (process.env.NODE_ENV !== 'production') {
+            if (methods && hasOwn(methods, key)) {
+                warn(
+                    `Method "${key}" has already been defined as a data property.`,
+                    vm
+                )
+            }
+        }
+        // 判断是否存在某一项的key与prop中某个属性名重复，如果存在重复，就抛出警告：提示用户属性名重复。
+        if (props && hasOwn(props, key)) {
+            process.env.NODE_ENV !== 'production' && warn(
+                `The data property "${key}" is already declared as a prop. ` +
+                `Use prop default value instead.`,
+                vm
+            )
+        } else if (!isReserved(key)) {
+            // 调用proxy函数将data对象中key不以_或$开头的属性代理到实例vm上，这样，我们就可以通过this.xxx来访问data选项中的xxx数据
+            proxy(vm, `_data`, key)
+        }
+    }
+    // observe data
+    observe(data, true /* asRootData */)
+}
+```
+
+##### 初始化computed
+
+```js
+function initComputed (vm: Component, computed: Object) {
+    const watchers = vm._computedWatchers = Object.create(null)
+    const isSSR = isServerRendering()
+
+    for (const key in computed) {
+        const userDef = computed[key]
+        // 遍历computed选项中的每一项属性，首先获取到每一项的属性值，记作userDef，然后判断userDef是不是一个函数，如果是函数，则该函数默认为取值器getter，将其赋值给变量getter；如果不是函数，则说明是一个对象，则取对象中的get属性作为取值器赋给变量getter.
+        const getter = typeof userDef === 'function' ? userDef : userDef.get
+        if (process.env.NODE_ENV !== 'production' && getter == null) {
+            warn(
+                `Getter is missing for computed property "${key}".`,
+                vm
+            )
+        }
+
+        if (!isSSR) {
+            // create internal watcher for the computed property.
+            watchers[key] = new Watcher(
+                vm,
+                getter || noop,
+                noop,
+                computedWatcherOptions
+            )
+        }
+		// 判断当前循环到的的属性名是否存在于当前实例vm上，如果存在，则在非生产环境下抛出警告；如果不存在，则调用defineComputed函数为实例vm上设置计算属性。
+        if (!(key in vm)) {
+            defineComputed(vm, key, userDef)
+        } else if (process.env.NODE_ENV !== 'production') {
+            if (key in vm.$data) {
+                warn(`The computed property "${key}" is already defined in data.`, vm)
+            } else if (vm.$options.props && key in vm.$options.props) {
+                warn(`The computed property "${key}" is already defined as a prop.`, vm)
+            }
+        }
+    }
+}
+```
+
+###### defineComputed函数分析
+
+```js
+const sharedPropertyDefinition = {
+  enumerable: true,
+  configurable: true,
+  get: noop,
+  set: noop
+}
+/*
+* 作用是为target上定义一个属性key，并且属性key的getter和setter根据userDef的值来设置
+* target
+* key
+* userDef
+*/
+export function defineComputed (target,key,userDef) {
+  const shouldCache = !isServerRendering()
+  if (typeof userDef === 'function') {
+    sharedPropertyDefinition.get = shouldCache
+      ? createComputedGetter(key)
+      : userDef
+    sharedPropertyDefinition.set = noop
+  } else {
+    sharedPropertyDefinition.get = userDef.get
+      ? shouldCache && userDef.cache !== false
+        ? createComputedGetter(key)
+        : userDef.get
+      : noop
+    sharedPropertyDefinition.set = userDef.set
+      ? userDef.set
+      : noop
+  }
+  if (process.env.NODE_ENV !== 'production' &&
+      sharedPropertyDefinition.set === noop) {
+    sharedPropertyDefinition.set = function () {
+      warn(
+        `Computed property "${key}" was assigned to but it has no setter.`,
+        this
+      )
+    }
+  }
+  Object.defineProperty(target, key, sharedPropertyDefinition)
+}
+```
+
+###### createComputedGetter函数分析
+
+该函数是一个高阶函数，其内部返回了一个`computedGetter`函数，所以其实是将`computedGetter`函数赋给了`sharedPropertyDefinition.get`。当获取计算属性的值时会执行属性的`getter`，而属性的`getter`就是 `sharedPropertyDefinition.get`，也就是说最终执行的 `computedGetter`函数。
+
+```js
+function createComputedGetter (key) {
+    return function computedGetter () {
+        const watcher = this._computedWatchers && this._computedWatchers[key]
+        if (watcher) {
+            // 收集依赖
+            watcher.depend()
+            // 将计算结果返回
+            return watcher.evaluate()
+        }
+    }
+}
+```
+
+######  depend和evaluate
+
+```js
+const computedWatcherOptions = { computed: true }
+watchers[key] = new Watcher(
+    vm,
+    getter || noop,
+    noop,
+    computedWatcherOptions
+)
+
+export default class Watcher {
+    constructor (vm,expOrFn,cb,options,isRenderWatcher) {
+        if (options) {
+            // ...
+            this.computed = !!options.computed
+            // ...
+        } else {
+            // ...
+        }
+
+        this.dirty = this.computed // for computed watchers
+        if (typeof expOrFn === 'function') {
+            this.getter = expOrFn
+        }
+
+        if (this.computed) {
+            this.value = undefined
+            this.dep = new Dep()
+        }
+    }
+
+    evaluate () {
+        if (this.dirty) {
+            this.value = this.get()
+            this.dirty = false
+        }
+        return this.value
+    }
+
+    /**
+     * Depend on this watcher. Only for computed property watchers.
+     */
+    depend () {
+        if (this.dep && Dep.target) {
+            this.dep.depend()
+        }
+    }
+
+    update () {
+        if (this.computed) {
+            if (this.dep.subs.length === 0) {
+                this.dirty = true
+            } else {
+                this.getAndInvoke(() => {
+                    this.dep.notify()
+                })
+            }
+        }
+    }
+
+    getAndInvoke (cb: Function) {
+        const value = this.get()
+        if (
+            value !== this.value ||
+            // Deep watchers and watchers on Object/Arrays should fire even
+            // when the value is the same, because the value may
+            // have mutated.
+            isObject(value) ||
+            this.deep
+        ) {
+            // set new value
+            const oldValue = this.value
+            this.value = value
+            this.dirty = false
+            if (this.user) {
+                try {
+                    cb.call(this.vm, value, oldValue)
+                } catch (e) {
+                    handleError(e, this.vm, `callback for watcher "${this.expression}"`)
+                }
+            } else {
+                cb.call(this.vm, value, oldValue)
+            }
+        }
+    }
+}
+```
+
+可以看到，在实例化`Watcher`类的时候，第四个参数传入了一个对象`computedWatcherOptions = { computed: true }`，该对象中的`computed`属性标志着这个`watcher`实例是计算属性的`watcher`实例，即`Watcher`类中的`this.computed`属性，同时类中还定义了`this.dirty`属性用于标志计算属性的返回值是否有变化，计算属性的缓存就是通过这个属性来判断的，每当计算属性依赖的数据发生变化时，会将`this.dirty`属性设置为`true`，这样下一次读取计算属性时，会重新计算结果返回，否则直接返回之前的计算结果。
+
+当调用`watcher.depend()`方法时，会将读取计算属性的那个`watcher`添加到计算属性的`watcher`实例的依赖列表中，当计算属性中用到的数据发生变化时，计算属性的`watcher`实例就会执行`watcher.update()`方法，在`update`方法中会判断当前的`watcher`是不是计算属性的`watcher`，如果是则调用`getAndInvoke`去对比计算属性的返回值是否发生了变化，如果真的发生变化，则执行回调，通知那些读取计算属性的`watcher`重新执行渲染逻辑。
+
+当调用`watcher.evaluate()`方法时，会先判断`this.dirty`是否为`true`，如果为`true`，则表明计算属性所依赖的数据发生了变化，则调用`this.get()`重新获取计算结果最后返回；如果为`false`，则直接返回之前的计算结果。
+
+![img](https://vue-js.com/learn-vue/assets/img/2.3828fb66.png)
+
+##### 初始化watch
+
+在函数内部会遍历`watch`选项，拿到每一项的`key`和对应的值`handler`。然后判断`handler`是否为数组，如果是数组则循环该数组并将数组中的每一项依次调用`createWatcher`函数来创建`watcher`；如果不是数组，则直接调用`createWatcher`函数来创建`watcher`。
+
+```js
+function initWatch (vm, watch) {
+  for (const key in watch) {
+    const handler = watch[key]
+    if (Array.isArray(handler)) {
+      for (let i = 0; i < handler.length; i++) {
+        createWatcher(vm, key, handler[i])
+      }
+    } else {
+      createWatcher(vm, key, handler)
+    }
+  }
+}
+```
+
+###### createWatcher
+
+```js
+/*
+* vm:当前实例；
+* expOrFn:被侦听的属性表达式
+* handler:watch选项中每一项的值
+* options:用于传递给vm.$watch的选项对象
+*/
+function createWatcher (
+  vm: Component,
+  expOrFn: string | Function,
+  handler: any,
+  options?: Object
+) {
+  if (isPlainObject(handler)) {
+    options = handler
+    handler = handler.handler
+  }
+  if (typeof handler === 'string') {
+    handler = vm[handler]
+  }
+  return vm.$watch(expOrFn, handler, options)
+}
+```
+
 生命周期初始化阶段所调用的第五个初始化函数——`initState`。该初始化函数内部总共初始化了5个选项，分别是：`props`、`methods`、`data`、`computed`和`watch`。
 
 这5个选项的初始化顺序不是任意的，而是经过精心安排的。只有按照这种顺序初始化我们才能在开发中在`data`中可以使用`props`，在`watch`中可以观察`data`和`props`。
