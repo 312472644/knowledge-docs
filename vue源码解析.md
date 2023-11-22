@@ -1,8 +1,8 @@
-### **1、变化侦测篇**
+## **1、变化侦测篇**
 
-#### Object的变化侦测
+#### 1-1、Object的变化侦测
 
-###### 1.使Object数据变得“可观测”
+###### 1、使Object数据变得“可观测”
 
 数据的每次读和写能够被我们看的见，即我们能够知道数据什么时候被读取了或数据什么时候被改写了，我们将其称为数据变的‘可观测’。要将数据变的‘可观测’，我们就要借助前言中提到的`Object.defineProperty`方法了，在本文中，我们就使用这个方法使数据变得“可观测”。
 
@@ -73,7 +73,7 @@ function defineReactive (obj,key,val) {
 
 然后判断数据的类型，只有`object`类型的数据才会调用`walk`将每一个属性转换成`getter/setter`的形式来侦测变化。 最后，在`defineReactive`中当传入的属性值还是一个`object`时使用`new observer（val）`来递归子属性，这样我们就可以把`obj`中的所有属性（包括子属性）都转换成`getter/seter`的形式来侦测变化。 也就是说，只要我们将一个`object`传到`observer`中，那么这个`object`就会变成可观测的、响应式的`object`。
 
-###### 2.依赖收集
+###### 2、依赖收集
 
 谁用到了这个数据，那么当这个数据变化时就通知谁。所谓谁用到了这个数据，其实就是谁获取了这个数据，而可观测的数据被获取时会触发`getter`属性，那么我们就可以在`getter`中收集这个依赖。同样，当这个数据变化时会触发`setter`属性，那么我们就可以在`setter`中通知依赖更新。
 
@@ -155,7 +155,7 @@ function defineReactive (obj,key,val) {
 
 在上述代码中，我们在`getter`中调用了`dep.depend()`方法收集依赖，在`setter`中调用`dep.notify()`方法通知所有依赖更新。
 
-###### 3.依赖到底是谁
+###### 3、依赖到底是谁
 
 在`Vue`中还实现了一个叫做`Watcher`的类，而`Watcher`类的实例就是我们上面所说的那个"谁"。换句话说就是：谁用到了数据，谁就是依赖，我们就为谁创建一个`Watcher`实例。在之后数据变化时，我们不直接去通知依赖更新，而是通知依赖对应的`Watch`实例，由`Watcher`实例去通知真正的视图。
 
@@ -222,11 +222,11 @@ export function parsePath (path) {
 
 ![img](https://vue-js.com/learn-vue/assets/img/3.0b99330d.jpg)
 
-###### 4.不足之处
+###### 4、不足之处
 
 虽然我们通过`Object.defineProperty`方法实现了对`object`数据的可观测，但是这个方法仅仅只能观测到`object`数据的取值及设置值，当我们向`object`数据里添加一对新的`key/value`或删除一对已有的`key/value`时，它是无法观测到的，导致当我们对`object`数据添加或删除值时，无法通知依赖，无法驱动视图进行响应式更新。
 
-###### 5.总结
+###### 5、总结
 
 其整个流程大致如下：
 
@@ -235,9 +235,9 @@ export function parsePath (path) {
 3. 当数据发生了变化时，会触发`setter`，从而向`Dep`中的依赖（即Watcher）发送通知。
 4. `Watcher`接收到通知后，会向外界发送通知，变化通知到外界后可能会触发视图更新，也有可能触发用户的某个回调函数等。
 
-#### Array的变化侦测
+#### 1-2、Array的变化侦测
 
-###### 1.使Array型数据可观测
+###### 1、使Array型数据可观测
 
 `Vue`中创建了一个数组方法拦截器，它拦截在数组实例与`Array.prototype`之间，在拦截器内重写了操作数组的一些方法，当数组实例使用操作数组方法时，其实使用的是拦截器中重写的方法，而不再使用`Array.prototype`上的原生方法。
 
@@ -318,7 +318,7 @@ function copyAugment (target: Object, src: Object, keys: Array<string>) {
 
 首先判断了浏览器是否支持`__proto__`，如果支持，则调用`protoAugment`函数把`value.__proto__ = arrayMethods`；如果不支持，则调用`copyAugment`函数把拦截器中重写的7个方法循环加入到`value`上。
 
-###### 2.收集依赖
+###### 2、收集依赖
 
 数组的依赖在`getter`中收集，那么在`getter`中到底该如何收集呢？这里有一个需要注意的点，那就是依赖管理器定义在`Observer`类中，而我们需要在`getter`中收集依赖，也就是说我们必须在`getter`中能够访问到`Observer`类中的依赖管理器，才能把依赖存进去。源码是这么做的：
 
@@ -368,7 +368,7 @@ export function observe (value, asRootData){
 
 而在`defineReactive`函数中，首先获取数据对应的`Observer`实例`childOb`，然后在`getter`中调用`Observer`实例上依赖管理器，从而将依赖收集起来。
 
-###### 3.如何通知依赖
+###### 3、如何通知依赖
 
 我们应该在拦截器里通知依赖，要想通知依赖，首先要能访问到依赖。要访问到依赖也不难，因为我们只要能访问到被转化成响应式的数据`value`即可，因为`vaule`上的`__ob__`就是其对应的`Observer`类实例，有了`Observer`类实例我们就能访问到它上面的依赖管理器，然后只需调用依赖管理器的`dep.notify()`方法，让它去通知依赖更新即可。源码如下：
 
@@ -391,7 +391,7 @@ methodsToPatch.forEach(function (method) {
 
 上面代码中，由于我们的拦截器是挂载到数组数据的原型上的，所以拦截器中的`this`就是数据`value`，拿到`value`上的`Observer`类实例，从而你就可以调用`Observer`类实例上面依赖管理器的`dep.notify()`方法，以达到通知依赖的目的。
 
-###### 4.深度侦测
+###### 4、深度侦测
 
 `Array`型数据的变化侦测都仅仅说的是数组自身变化的侦测，比如给数组新增一个元素或删除数组中一个元素，而在`Vue`中，不论是`Object`型数据还是`Array`型数据所实现的数据变化侦测都是深度侦测，所谓深度侦测就是不但要侦测数据自身的变化，还要侦测数据中所有子数据的变化。
 
@@ -471,7 +471,7 @@ methodsToPatch.forEach(function (method) {
 })
 ```
 
-###### 5.不足之处
+###### 5、不足之处
 
 对于数组变化侦测是通过拦截器实现的，也就是说只要是通过数组原型上的方法对数组进行操作就都可以侦测到，但是别忘了，我们在日常开发中，还可以通过数组的下标来操作数据，如下：
 
@@ -483,15 +483,15 @@ arr.length = 0    // 通过修改数组长度清空数组
 
 而使用上述例子中的操作方式来修改数组是无法侦测到的。 同样，`Vue`也注意到了这个问题， 为了解决这一问题，`Vue`增加了两个全局API:`Vue.set`和`Vue.delete`。
 
-### 2、虚拟DOM
+## 2、虚拟DOM
 
-#### Vue中的虚拟DOM
+#### 2-1、Vue中的虚拟DOM
 
 ##### Vue中的DOM-Diff
 
 我们知道，`Vue`是数据驱动视图的，数据发生变化视图就要随之更新，在更新视图的时候难免要操作`DOM`,而操作真实`DOM`又是非常耗费性能的，我们可以用`JS`的计算性能来换取操作`DOM`所消耗的性能。我们不要盲目的去更新视图，而是通过对比数据变化前后的状态，计算出视图中哪些地方需要更新，只更新需要更新的地方，而不需要更新的地方则不需关心，这样我们就可以尽可能少的操作`DOM`了。
 
-###### VNode类
+###### 1、VNode类
 
 ```javascript
 // 源码位置：src/core/vdom/vnode.js
@@ -538,7 +538,7 @@ export default class VNode {
 }
 ```
 
-###### VNode的类型
+###### 2、VNode的类型
 
 - 注释节点
 - 文本节点
@@ -547,7 +547,7 @@ export default class VNode {
 - 函数式组件节点
 - 克隆节点
 
-###### 注释节点
+###### 3、注释节点
 
 ```javascript
 // 创建注释节点
@@ -572,7 +572,7 @@ export function createTextVNode (val: string | number) {
 }
 ```
 
-###### 元素节点
+###### 4、元素节点
 
 相比之下，元素节点更贴近于我们通常看到的真实`DOM`节点，它有描述节点标签名词的`tag`属性，描述节点属性如`class`、`attributes`等的`data`属性，有描述包含的子节点信息的`children`属性等。
 
@@ -593,21 +593,21 @@ export function createTextVNode (val: string | number) {
 }
 ```
 
-###### 组件节点
+###### 5、组件节点
 
 组件节点除了有元素节点具有的属性之外，它还有两个特有的属性：
 
 - componentOptions :组件的option选项，如组件的`props`等
 - componentInstance :当前组件节点对应的`Vue`实例
 
-###### 函数式组件节点
+###### 6、函数式组件节点
 
 函数式组件节点相较于组件节点，它又有两个特有的属性：
 
 - fnContext:函数式组件对应的Vue实例
 - fnOptions: 组件的option选项
 
-###### 克隆节点
+###### 7、克隆节点
 
 克隆节点就是把一个已经存在的节点复制一份出来，它主要是为了做模板编译优化时使用。
 
@@ -647,7 +647,7 @@ export function cloneVNode (vnode: VNode): VNode {
 - 删除节点：新的`VNode`中没有而旧的`oldVNode`中有，就从旧的`oldVNode`中删除。
 - 更新节点：新的`VNode`和旧的`oldVNode`中都有，就以新的`VNode`为准，更新旧的`oldVNode`。
 
-###### 创建节点
+###### 1、创建节点
 
 ```javascript
 // 源码位置: /src/core/vdom/patch.js
@@ -673,7 +673,7 @@ function createElm (vnode, parentElm, refElm) {
 - 判断是否为注释节点，只需判断`VNode`的`isComment`属性是否为`true`即可，若为`true`则为注释节点，则调用`createComment`方法创建注释节点，再插入到`DOM`中。
 - 如果既不是元素节点，也不是注释节点，那就认为是文本节点，则调用`createTextNode`方法创建文本节点，再插入到`DOM`中。
 
-###### 删除节点
+###### 2、删除节点
 
 如果某些节点再新的`VNode`中没有而在旧的`oldVNode`中有，那么就需要把这些节点从旧的`oldVNode`中删除。删除节点非常简单，只需在要删除节点的父元素上调用`removeChild`方法即可。源码如下：
 
@@ -686,7 +686,7 @@ function removeNode (el) {
   }
 ```
 
-###### 更新节点
+###### 3、更新节点
 
 ```javascript
 1、当修改数据时，触发set属性Dep.notify()方法通知对应的订阅者，然后调用patch(oldNode,newNode)方法进行比对。
@@ -701,13 +701,13 @@ function removeNode (el) {
    如果上述情况匹配不到，则需要用旧节点key值去比对新节点key值，如果key值相同则复用，并将旧节点移动到新节点位置。
 ```
 
-### 3、模版编译
+## 3、模版编译
 
 所谓渲染流程，就是把用户写的类似于原生`HTML`的模板经过一系列处理最终反应到视图中称之为整个渲染流程。
 
 ![img](https://vue-js.com/learn-vue/assets/img/1.f0570125.png)
 
-#### 具体流程
+#### 3-1、具体流程
 
 将一堆字符串模板解析成抽象语法树`AST`后，我们就可以对其进行各种操作处理了，处理完后用处理后的`AST`来生成`render`函数。其具体流程可大致分为三个阶段：
 
@@ -736,11 +736,11 @@ export const createCompiler = createCompilerCreator(function baseCompile (
 })
 ```
 
-#### 模板解析阶段(整体运行流程)
+#### 3-2、模板解析阶段(整体运行流程)
 
 模板解析其实就是根据被解析内容的特点使用正则等方式将有效信息解析提取出来，根据解析内容的不同分为HTML解析器，文本解析器和过滤器解析器。而文本信息与过滤器信息又存在于HTML标签中，所以在解析器主线函数`parse`中先调用HTML解析器`parseHTML` 函数对模板字符串进行解析，如果在解析过程中遇到文本或过滤器信息则再调用相应的解析器进行解析，最终完成对整个模板字符串的解析。
 
-#### 模板解析阶段(HTML解析器)
+#### 3-3、模板解析阶段(HTML解析器)
 
 ```javascript
 // 代码位置：/src/complier/parser/index.js
@@ -847,7 +847,7 @@ comment (text: string) {
 - 开始标签，例如<div>
 - 结束标签，例如</div>
 
-###### 解析HTML注释
+###### 1、解析HTML注释
 
 解析注释比较简单，我们知道`HTML`注释是以`<!--`开头，以`-->`结尾，这两者中间的内容就是注释内容，那么我们只需用正则判断待解析的模板字符串`html`是否以`<!--`开头，若是，那就继续向后寻找`-->`，如果找到了，OK，注释就被解析出来了。
 
@@ -870,7 +870,7 @@ if (comment.test(html)) {
 }
 ```
 
-###### 解析条件注释
+###### 2、解析条件注释
 
 解析条件注释也比较简单，其原理跟解析注释相同，都是先用正则判断是否是以条件注释特有的开头标识开始，然后寻找其特有的结束标识，若找到，则说明是条件注释，将其截取出来即可，由于条件注释不存在于真正的`DOM`树中，所以不需要调用钩子函数创建`AST`节点。代码如下：
 
@@ -890,7 +890,7 @@ if (conditionalComment.test(html)) {
 }
 ```
 
-###### 解析DOCTYPE
+###### 3、解析DOCTYPE
 
 解析`DOCTYPE`的原理同解析条件注释完全相同，此处不再赘述，代码如下：
 
@@ -904,7 +904,7 @@ if (doctypeMatch) {
 }
 ```
 
-###### 解析开始标签
+###### 4、解析开始标签
 
 首先使用开始标签的正则去匹配模板字符串，看模板字符串是否具有开始标签的特征，如下：
 
@@ -933,7 +933,7 @@ if (start) {
 '我是文本</p>'.match(startTagOpen) => null
 ```
 
-###### 解析结束标签
+###### 5、解析结束标签
 
 结束标签的解析要比解析开始标签容易多了，因为它不需要解析什么属性，只需要判断剩下的模板字符串是否符合结束标签的特征，如果是，就将结束标签名提取出来，再调用4个钩子函数中的`end`函数就好了。
 
@@ -949,7 +949,7 @@ const endTagMatch = html.match(endTag)
 '<div>'.match(endTag)  // null
 ```
 
-###### 解析文本
+###### 6、解析文本
 
 解析文本也比较容易，在解析模板字符串之前，我们先查找一下第一个`<`出现在什么位置，如果第一个`<`在第一个位置，那么说明模板字符串是以其它5种类型开始的；如果第一个`<`不在第一个位置而在模板字符串中间某个位置，那么说明模板字符串是以文本开头的，那么从开头到第一个`<`出现的位置就都是文本内容了；如果在整个模板字符串里没有找到`<`，那说明整个模板字符串都是文本。这就是解析思路，接下来我们对照源码来了解一下实际的解析过程，源码如下：
 
@@ -1019,7 +1019,7 @@ if (options.chars && text) {
 
 按照上面的流程解析这个模板字符串时，当解析到结束标签`</p>`时，此时栈顶的标签应该是`p`才对，而现在是`span`，那么就说明`span`标签没有被正确闭合，此时控制台就会抛出警告：‘tag has no matching end tag.’相信这个警告你一定不会陌生。这就是栈的第二个用途： 检测模板字符串中是否有未正确闭合的标签。
 
-#### 模板解析阶段(文本解析器)
+#### 3-4、模板解析阶段(文本解析器)
 
 ```javascript
 // 当解析到标签的文本时，触发chars
@@ -1048,7 +1048,7 @@ chars (text) {
 
 
 
-#### 优化阶段
+#### 3-5、优化阶段
 
 优化阶段其实就干了两件事：
 
@@ -1067,7 +1067,7 @@ export function optimize (root: ?ASTElement, options: CompilerOptions) {
 }
 ```
 
-###### 标记静态节点
+###### 1、标记静态节点
 
 判断是否为静态节点：
 
@@ -1103,7 +1103,7 @@ function isStatic (node: ASTNode): boolean {
 
 ###### 标记静态根节点
 
-判断是否为静态根节点：
+2、判断是否为静态根节点：
 
 ```javascript
 // 为了使节点有资格作为静态根节点，它应具有不只是静态文本的子节点。 否则，优化的成本将超过收益，最好始终将其更新。
@@ -1126,7 +1126,7 @@ if (node.static && node.children.length && !(
 
 
 
-### 4、生命周期
+## 4、生命周期
 
 下图是`Vue`官网给出的`Vue`实例的生命周期流程图，如下：
 
@@ -1139,7 +1139,7 @@ if (node.static && node.children.length && !(
 - 挂载阶段：将实例挂载到指定的`DOM`上，即将模板渲染到真实`DOM`中；
 - 销毁阶段：将实例自身从父组件中删除，并取消依赖追踪及事件监听器；
 
-#### 初始化阶段(new Vue)
+#### 4-1、初始化阶段(new Vue)
 
 合并配置，调用一些初始化函数，触发生命周期钩子函数，调用`$mount`开启下一个阶段。
 
@@ -1180,7 +1180,7 @@ export function initMixin (Vue) {
 }
 ```
 
-##### 合并属性
+##### 1、合并属性
 
 它实际上就是把 `resolveConstructorOptions(vm.constructor)` 的返回值和 `options` 做合并，`resolveConstructorOptions` 的实现先不考虑，可简单理解为返回 `vm.constructor.options`，相当于 `Vue.options`。
 
@@ -1284,7 +1284,7 @@ export const LIFECYCLE_HOOKS = [
 ]
 ```
 
-#### callHook函数如何触发钩子函数
+#### 4-2、callHook函数如何触发钩子函数
 
 `callHook`函数逻辑非常简单。首先从实例的`$options`中获取到需要触发的钩子名称所对应的钩子函数数组`handlers`，我们说过，每个生命周期钩子名称都对应了一个钩子函数数组。然后遍历该数组，将数组中的每个钩子函数都执行一遍。
 
@@ -1303,7 +1303,7 @@ export function callHook (vm: Component, hook: string) {
 }
 ```
 
-#### 初始化阶段(initLifecycle)【生命周期】
+#### 4-3、初始化阶段(initLifecycle)【生命周期】
 
 主要是给`Vue`实例上挂载了一些属性并设置了默认值。
 
@@ -1336,9 +1336,9 @@ export function initLifecycle (vm: Component) {
 }
 ```
 
-#### 初始化阶段(initEvents)【事件绑定】
+#### 4-4、初始化阶段(initEvents)【事件绑定】
 
-##### 解析事件
+##### 1、解析事件
 
 ```javascript
 export const onRE = /^@|^v-on:/
@@ -1473,7 +1473,7 @@ export function createComponent (
 
 父组件给子组件的注册事件中，把自定义事件传给子组件，在子组件实例化的时候进行初始化；而浏览器原生事件是在父组件中处理。
 
-##### initEvents函数分析
+##### 2、initEvents函数分析
 
 `initEvents`函数逻辑非常简单，首先在`vm`上新增`_events`属性并将其赋值为空对象，用来存储事件。接着，获取父组件注册的事件赋给`listeners`，如果`listeners`不为空，则调用`updateComponentListeners`函数，将父组件向子组件注册的事件注册到子组件的实例中。
 
@@ -1496,7 +1496,7 @@ export function initEvents (vm: Component) {
 
 
 
-#### 初始化阶段(initInjections) 【依赖注入】
+#### 4-5、初始化阶段(initInjections) 【依赖注入】
 
 这里所说的数据就是我们通常所写`data`、`props`、`watch`、`computed`及`method`，所以`inject`选项接收到注入的值有可能被以上这些数据所使用到，所以在初始化完`inject`后需要先初始化这些数据，然后才能再初始化`provide`，所以在调用`initInjections`函数对`inject`初始化完之后需要先调用`initState`函数对数据进行初始化，最后再调用`initProvide`函数对`provide`进行初始化。
 
@@ -1520,7 +1520,7 @@ export function toggleObserving (value: boolean) {
 }
 ```
 
-##### resolveInject函数分析
+##### 1、resolveInject函数分析
 
 `inject` 选项中的每一个数据`key`都是由其上游父级组件提供的，所以我们应该把每一个数据`key`从当前组件起，不断的向上游父级组件中查找该数据`key`对应的值，直到找到为止。如果在上游所有父级组件中没找到，那么就看在`inject` 选项是否为该数据`key`设置了默认值，如果设置了就使用默认值，如果没有设置，则抛出异常。
 
@@ -1587,9 +1587,9 @@ function normalizeInject (options: Object, vm: ?Component) {
 }
 ```
 
-#### 初始化阶段(initState) 【属性】
+#### 4-6、初始化阶段(initState) 【属性】
 
-##### initState函数分析
+##### 1、initState函数分析
 
 ```javascript
 export function initState (vm: Component) {
@@ -1609,7 +1609,7 @@ export function initState (vm: Component) {
 }
 ```
 
-##### 初始化props
+##### 2、初始化props
 
 在子组件内部，通过`props`选项来接收父组件传来的数据，在接收的时候可以这样写：
 
@@ -1668,7 +1668,7 @@ function normalizeProps (options, vm) {
 }
 ```
 
-###### initProps函数分析
+###### 2-1、initProps函数分析
 
 ```js
 function initProps (vm: Component, propsOptions: Object) {
@@ -1721,7 +1721,7 @@ function initProps (vm: Component, propsOptions: Object) {
 }
 ```
 
-###### validateProp函数分析
+###### 2-2、validateProp函数分析
 
 ```js
 /*
@@ -1767,7 +1767,7 @@ export function validateProp (key,propOptions,propsData,vm) {
 }
 ```
 
-###### getPropDefaultValue函数分析
+###### 2-3、getPropDefaultValue函数分析
 
 ```js
 /**
@@ -1807,7 +1807,7 @@ function getPropDefaultValue (vm, prop, key){
 }
 ```
 
-###### assertProp函数分析
+###### 2-4、assertProp函数分析
 
 ```js
 /*
@@ -1863,7 +1863,7 @@ function assertProp (prop,name,value,vm,absent) {
 }
 ```
 
-##### 初始化methods
+##### 3、初始化methods
 
 ```js
 function initMethods (vm, methods) {
@@ -1898,7 +1898,7 @@ function initMethods (vm, methods) {
 }
 ```
 
-##### 初始化data
+##### 4、初始化data
 
 ```js
 function initData (vm) {
@@ -1948,7 +1948,7 @@ function initData (vm) {
 }
 ```
 
-##### 初始化computed
+##### 5、初始化computed
 
 ```js
 function initComputed (vm: Component, computed: Object) {
@@ -1989,7 +1989,7 @@ function initComputed (vm: Component, computed: Object) {
 }
 ```
 
-###### defineComputed函数分析
+###### 5-1、defineComputed函数分析
 
 ```js
 const sharedPropertyDefinition = {
@@ -2034,7 +2034,7 @@ export function defineComputed (target,key,userDef) {
 }
 ```
 
-###### createComputedGetter函数分析
+###### 5-2、createComputedGetter函数分析
 
 该函数是一个高阶函数，其内部返回了一个`computedGetter`函数，所以其实是将`computedGetter`函数赋给了`sharedPropertyDefinition.get`。当获取计算属性的值时会执行属性的`getter`，而属性的`getter`就是 `sharedPropertyDefinition.get`，也就是说最终执行的 `computedGetter`函数。
 
@@ -2052,7 +2052,7 @@ function createComputedGetter (key) {
 }
 ```
 
-######  depend和evaluate
+######  5-3、depend和evaluate
 
 ```js
 const computedWatcherOptions = { computed: true }
@@ -2149,7 +2149,7 @@ export default class Watcher {
 
 ![img](https://vue-js.com/learn-vue/assets/img/2.3828fb66.png)
 
-##### 初始化watch
+##### 6、初始化watch
 
 在函数内部会遍历`watch`选项，拿到每一项的`key`和对应的值`handler`。然后判断`handler`是否为数组，如果是数组则循环该数组并将数组中的每一项依次调用`createWatcher`函数来创建`watcher`；如果不是数组，则直接调用`createWatcher`函数来创建`watcher`。
 
@@ -2168,7 +2168,7 @@ function initWatch (vm, watch) {
 }
 ```
 
-###### createWatcher
+###### 6-1、createWatcher
 
 ```js
 /*
@@ -2183,11 +2183,14 @@ function createWatcher (
   handler: any,
   options?: Object
 ) {
+  // 判断传入的handler是否为一个对象
   if (isPlainObject(handler)) {
+    // 侦听选项的写法，此时就将handler对象整体记作options，把handler对象中的handler属性作为真正的回调函数记作handler
     options = handler
     handler = handler.handler
   }
   if (typeof handler === 'string') {
+    // 调函数是methods选项中的一个方法名，我们知道，在初始化methods选项的时候会将选项中的每一个方法都绑定到当前实例上，所以此时我们只需从当前实例上取出该方法作为真正的回调函数记作handler 
     handler = vm[handler]
   }
   return vm.$watch(expOrFn, handler, options)
@@ -2200,8 +2203,216 @@ function createWatcher (
 
 这5个选项中的所有属性最终都会被绑定到实例上，这也就是我们为什么可以使用`this.xxx`来访问任意属性。同时正是因为这一点，这5个选项中的所有属性名都不应该有所重复，这样会造成属性之间相互覆盖。
 
-#### 模板编译阶段
+#### 4-7、模板编译阶段
 
-#### 挂载阶段
+![img](https://vue-js.com/learn-vue/assets/img/3.8d0dc6f5.png)
 
-#### 销毁阶段
+模板编译阶段并不是存在于`Vue`的所有构建版本中，它只存在于完整版（即`vue.js`）中。在只包含运行时版本（即`vue.runtime.js`）中并不存在该阶段，这是因为当使用`vue-loader`或`vueify`时，`*.vue`文件内部的模板会在构建时预编译成渲染函数，所以是不需要编译的，从而不存在模板编译阶段，由上一步的初始化阶段直接进入下一阶段的挂载阶段。
+
+`vue`基于源码构建的有两个版本，一个是`runtime only`(一个只包含运行时的版本)，另一个是`runtime + compiler`(一个同时包含编译器和运行时的完整版本)。而两个版本的区别仅在于后者包含了一个编译器。
+
+##### 1、完整版本
+
+一个完整的`Vue`版本是包含编译器的，我们可以使用`template`选项进行模板编写。编译器会自动将`template`选项中的模板字符串编译成渲染函数的代码,源码中就是`render`函数。如果你需要在客户端编译模板 (比如传入一个字符串给 `template` 选项，或挂载到一个元素上并以其 `DOM` 内部的 HTML 作为模板)，就需要一个包含编译器的版本。 
+
+```js
+// 需要编译器的版本
+new Vue({
+  template: '<div>{{ hi }}</div>'
+})
+```
+
+##### 2、只包含运行时版本
+
+只包含运行时的版本拥有创建`Vue`实例、渲染并处理`Virtual DOM`等功能，基本上就是除去编译器外的完整代码。
+
+1.我们在选项中通过手写`render`函数去定义渲染过程，这个时候并不需要包含编译器的版本便可完整执行。
+
+```js
+// 不需要编译器
+new Vue({
+  render (h) {
+    return h('div', this.hi)
+  }
+})
+```
+
+两种版本`$mount`方法的区别。它们的区别在于在`$mount`方法中是否进行了模板编译。在只包含运行时版本的`$mount`方法中获取到`DOM`元素后直接进入挂载阶段，而在完整版本的`$mount`方法中是先将模板进行编译，然后回过头调只包含运行时版本的`$mount`方法进入挂载阶段。
+
+2.借助`vue-loader`这样的编译工具进行编译，当我们利用`webpack`进行`Vue`的工程化开发时，常常会利用`vue-loader`对`*.vue`文件进行编译，尽管我们也是利用`template`模板标签去书写代码，但是此时的`Vue`已经不需要利用编译器去负责模板的编译工作了，这个过程交给了插件去实现。
+
+##### 3、模板编译阶段分析
+
+```js
+var mount = Vue.prototype.$mount;
+Vue.prototype.$mount = function (el,hydrating) {
+  // 根据传入的el参数获取DOM元素；
+  el = el && query(el);
+  if (el === document.body || el === document.documentElement) {
+    warn(
+      "Do not mount Vue to <html> or <body> - mount to normal elements instead."
+    );
+    return this
+  }
+
+  var options = this.$options;
+  // 在用户没有手写render函数的情况下获取传入的模板template
+  if (!options.render) {
+    var template = options.template;
+    if (template) {
+      // 如果变量template存在，则接着判断如果template是字符串并且以##开头，则认为template是id选择符，则调用idToTemplate函数获取到选择符对应的DOM元素的innerHTML作为模板
+      if (typeof template === 'string') {
+          if (template.charAt(0) === '#') {
+            template = idToTemplate(template);
+            /* istanbul ignore if */
+            if (!template) {
+              warn(
+                ("Template element not found or is empty: " + (options.template)),
+                this
+              );
+            }
+          }
+      }
+      // template不是字符串，那就判断它是不是一个DOM元素，如果是，则使用该DOM元素的innerHTML作为模板
+      else if (template.nodeType) {
+        template = template.innerHTML;
+      } else {
+        {
+          warn('invalid template option:' + template, this);
+        }
+        return this
+      }
+    }
+    // 如果变量template不存在，表明用户没有传入template选项，则根据传入的el参数调用getOuterHTML函数获取外部模板
+    else if (el) {
+      template = getOuterHTML(el);
+    }
+    if (template) {
+      if (config.performance && mark) {
+        mark('compile');
+      }
+
+      var ref = compileToFunctions(template, {
+        outputSourceRange: "development" !== 'production',
+        shouldDecodeNewlines: shouldDecodeNewlines,
+        shouldDecodeNewlinesForHref: shouldDecodeNewlinesForHref,
+        delimiters: options.delimiters,
+        comments: options.comments
+      }, this);
+      var render = ref.render;
+      var staticRenderFns = ref.staticRenderFns;
+      options.render = render;
+      options.staticRenderFns = staticRenderFns;
+
+      if (config.performance && mark) {
+        mark('compile end');
+        measure(("vue " + (this._name) + " compile"), 'compile', 'compile end');
+      }
+    }
+  }
+  return mount.call(this, el, hydrating)
+};
+```
+
+#### 4-8、挂载阶段
+
+模板编译阶段完成之后，接下来就进入了挂载阶段，从官方文档给出的生命周期流程图中可以看到，挂载阶段所做的主要工作是创建`Vue`实例并用其替换`el`选项对应的`DOM`元素，同时还要开启对模板中数据（状态）的监控，当数据（状态）发生变化时通知其依赖进行视图更新。
+
+![img](https://vue-js.com/learn-vue/assets/img/4.6a76bb54.png)
+
+```js
+export function mountComponent (vm,el,hydrating) {
+    vm.$el = el
+    // 首先会判断实例上是否存在渲染函数，如果不存在，则设置一个默认的渲染函数createEmptyVNode，该渲染函数会创建一个注释类型的VNode节点
+    if (!vm.$options.render) {
+        vm.$options.render = createEmptyVNode
+    }
+    callHook(vm, 'beforeMount')
+
+    let updateComponent
+
+    updateComponent = () => {
+        vm._update(vm._render(), hydrating)
+    }
+    new Watcher(vm, updateComponent, noop, {
+        before () {
+            if (vm._isMounted) {
+                callHook(vm, 'beforeUpdate')
+            }
+        }
+    }, true /* isRenderWatcher */)
+    hydrating = false
+
+    if (vm.$vnode == null) {
+        vm._isMounted = true
+        callHook(vm, 'mounted')
+    }
+    return vm
+}
+```
+
+首先执行渲染函数`vm._render()`得到一份最新的`VNode`节点树，然后执行`vm._update()`方法对最新的`VNode`节点树与上一次渲染的旧`VNode`节点树进行对比并更新`DOM`节点(即`patch`操作)，完成一次渲染。如果调用了`updateComponent`函数，就会将最新的模板内容渲染到视图页面中，这样就完成了挂载操作的一半工作，为在挂载阶段不但要将模板渲染到视图中，同时还要开启对模板中数据（状态）的监控，当数据（状态）发生变化时通知其依赖进行视图更新。
+
+```javascript
+updateComponent = () => {
+    vm._update(vm._render(), hydrating)
+}
+```
+
+主要工作是创建`Vue`实例并用其替换`el`选项对应的`DOM`元素，同时还要开启对模板中数据（状态）的监控，当数据（状态）发生变化时通知其依赖进行视图更新。
+
+我们将挂载阶段所做的工作分成两部分进行了分析，第一部分是将模板渲染到视图上，第二部分是开启对模板中数据（状态）的监控。两部分工作都完成以后挂载阶段才算真正的完成了。
+
+#### 4-9、销毁阶段
+
+当调用了`vm.$destroy`方法，`Vue`实例就进入了销毁阶段，该阶段所做的主要工作是将当前的`Vue`实例从其父级实例中删除，取消当前实例上的所有依赖追踪并且移除实例上的所有事件监听器。
+
+```javascript
+Vue.prototype.$destroy = function () {
+  const vm: Component = this
+  // 先判断当前实例的_isBeingDestroyed属性是否为true，因为该属性标志着当前实例是否处于正在被销毁的状态，如果它为true，则直接return退出函数，防止反复执行销毁逻辑。
+  if (vm._isBeingDestroyed) {
+    return
+  }
+  callHook(vm, 'beforeDestroy')
+  vm._isBeingDestroyed = true
+  // remove self from parent
+  const parent = vm.$parent
+  // 如果当前实例有父级实例，同时该父级实例没有被销毁并且不是抽象组件，那么就将当前实例从其父级实例的$children属性中删除，即将自己从父级实例的子实例列表中删除。
+  if (parent && !parent._isBeingDestroyed && !vm.$options.abstract) {
+    remove(parent.$children, vm)
+  }
+  // 实例身上的依赖包含两部分：一部分是实例自身依赖其他数据，需要将实例自身从其他数据的依赖列表中删除；另一部分是实例内的数据对其他数据的依赖（如用户使用$watch创建的依赖），也需要从其他数据的依赖列表中删除实例内数据。所以删除依赖的时候需要将这两部分依赖都删除掉。
+  if (vm._watcher) {
+    vm._watcher.teardown()
+  }
+  // 执行vm._watcher.teardown()将实例自身从其他数据的依赖列表中删除，teardown方法的作用是从所有依赖向的Dep列表中将自己删除。然后，在前面文章介绍initState函数时我们知道，所有实例内的数据对其他数据的依赖都会存放在实例的_watchers属性中，所以我们只需遍历_watchers
+  let i = vm._watchers.length
+  while (i--) {
+    vm._watchers[i].teardown()
+  }
+  // remove reference from data ob
+  // frozen object may not have observer.
+  if (vm._data.__ob__) {
+    vm._data.__ob__.vmCount--
+  }
+  // call the last hook...
+  vm._isDestroyed = true
+  // invoke destroy hooks on current rendered tree
+  vm.__patch__(vm._vnode, null)
+  // fire destroyed hook
+  callHook(vm, 'destroyed')
+  // turn off all instance listeners.
+  vm.$off()
+  // remove __vue__ reference
+  if (vm.$el) {
+    vm.$el.__vue__ = null
+  }
+  // release circular reference (##6759)
+  if (vm.$vnode) {
+    vm.$vnode.parent = null
+  }
+}
+```
+
+当调用了实例上的`vm.$destory`方法后，实例就进入了销毁阶段，在该阶段所做的主要工作是将当前的`Vue`实例从其父级实例中删除，取消当前实例上的所有依赖追踪并且移除实例上的所有事件监听器。
