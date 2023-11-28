@@ -2416,3 +2416,1100 @@ Vue.prototype.$destroy = function () {
 ```
 
 当调用了实例上的`vm.$destory`方法后，实例就进入了销毁阶段，在该阶段所做的主要工作是将当前的`Vue`实例从其父级实例中删除，取消当前实例上的所有依赖追踪并且移除实例上的所有事件监听器。
+
+
+
+## 5、实例方法篇
+
+#### 5-1、数据相关
+
+与数据相关的实例方法有3个，分别是`vm.$set`、`vm.$delete`和`vm.$watch`。它们是在`stateMixin`函数中挂载到`Vue`原型上的。
+
+```javascript
+import {set,del} from '../observer/index'
+
+export function stateMixin (Vue) {
+    Vue.prototype.$set = set
+    Vue.prototype.$delete = del
+    Vue.prototype.$watch = function (expOrFn,cb,options) {}
+}
+```
+
+##### 1、vm.$watch
+
+观察 `Vue` 实例变化的一个表达式或计算属性函数。回调函数得到的参数为新值和旧值。表达式只接受监督的键路径。对于更复杂的表达式，用一个函数取代。
+
+注意：在变异 (不是替换) 对象或数组时，旧值将与新值相同，因为它们的引用指向同一个对象/数组。`Vue` 不会保留变异之前值的副本。
+
+```js
+vm.$watch( expOrFn, callback, [options] )
+
+{string | Function} expOrFn
+{Function | Object} callback 
+{Object} [options]
+{boolean} deep
+{boolean} immediate
+{Function} unwatch // vm.$watch 返回一个取消观察函数，用来停止触发回调,注意在带有 immediate 选项时，你不能在第一次回调时取消侦听给定的 property。如果你仍然希望在回调内部调用一个取消侦听的函数，你应该先检查其函数的可用性：
+var unwatch = vm.$watch(
+  'value',
+  function () {
+    doSomething()
+    if (unwatch) {
+      unwatch()
+    }
+  },
+  { immediate: true }
+)
+```
+
+实现代码：
+
+```js
+Vue.prototype.$watch = function (expOrFn,cb,options) {
+    const vm: Component = this
+    // 是否为对象
+    if (isPlainObject(cb)) {
+      return createWatcher(vm, expOrFn, cb, options)
+    }
+    options = options || {}
+    // 由于该实例是用户手动调用$watch方法创建而来的，所以给options添加user属性并赋值为true，用于区分用户创建的watcher实例和Vue内部创建的watcher实例
+    options.user = true
+    const watcher = new Watcher(vm, expOrFn, cb, options)
+    if (options.immediate) {
+      cb.call(vm, watcher.value)
+    }
+    // 返回一个取消观察函数unwatchFn，用来停止触发回调。
+    return function unwatchFn () {
+      watcher.teardown()
+    }
+  }
+```
+
+如果传入的回调函数是个对象，那就表明用户是把第二个参数回调函数`cb`和第三个参数选项`options`合起来传入的，此时调用`createWatcher`函数。
+
+```js
+function createWatcher (vm,expOrFn,handler,options) {
+    if (isPlainObject(handler)) {
+        options = handler
+        handler = handler.handler
+    }
+    if (typeof handler === 'string') {
+        handler = vm[handler]
+    }
+    return vm.$watch(expOrFn, handler, options)
+}
+```
+
+这个取消观察函数`unwatchFn`内部其实是调用了`watcher`实例的`teardown`方法，那么我们来看一下这个`teardown`方法是如何实现的。
+
+创建`watcher`实例的时候会读取被观察的数据，读取了数据就表示依赖了数据，所以`watcher`实例就会存在于数据的依赖列表中，同时`watcher`实例也记录了自己依赖了哪些数据，另外我们还说过，每个数据都有一个自己的依赖管理器`dep`，`watcher`实例记录自己依赖了哪些数据其实就是把这些数据的依赖管理器`dep`存放在`watcher`实例的`this.deps = []`属性中，当取消观察时即`watcher`实例不想依赖这些数据了，那么就遍历自己记录的这些数据的依赖管理器，告诉这些数据可以从你们的依赖列表中把我删除了。
+
+```js
+export default class Watcher {
+    constructor (/* ... */) {
+        // ...
+        this.deps = []
+    }
+    teardown () {
+        let i = this.deps.length
+        while (i--) {
+            this.deps[i].removeSub(this)
+        }
+    }
+}
+```
+
+实现深度监听
+
+要想让数据变化时通知我们，那我们只需成为这个数据的依赖即可，因为数据变化时会通知它所有的依赖，那么如何成为数据的依赖呢，很简单，读取一下数据即可。也就是说我们只需在创建`watcher`实例的时候把`obj`对象内部所有的值都递归的读一遍，那么这个`watcher`实例就会被加入到对象内所有值的依赖列表中，之后当对象内任意某个值发生变化时就能够得到通知了。
+
+```js
+export default class Watcher {
+    constructor (/* ... */) {
+        this.value = this.get()
+    }
+    get () {
+        // 遍历每个属性，加入到对象依赖表中
+        if (this.deep) {
+            traverse(value)
+        }
+        return value
+    }
+}
+
+const seenObjects = new Set()
+
+export function traverse (val: any) {
+    _traverse(val, seenObjects)
+    seenObjects.clear()
+}
+
+function _traverse (val: any, seen: SimpleSet) {
+    let i, keys
+    const isA = Array.isArray(val)
+    // 非数组、对象 冻结属性 虚拟节点
+    if ((!isA && !isObject(val)) || Object.isFrozen(val) || val instanceof VNode) {
+        return
+    }
+    // 对象已经被检测过的属性标志
+    if (val.__ob__) {
+        const depId = val.__ob__.dep.id
+        if (seen.has(depId)) {
+            return
+        }
+        seen.add(depId)
+    }
+    if (isA) {
+        i = val.length
+        while (i--) _traverse(val[i], seen)
+    } else {
+        keys = Object.keys(val)
+        i = keys.length
+        while (i--) _traverse(val[keys[i]], seen)
+    }
+}
+```
+
+##### 2、vm.$set
+
+向响应式对象中添加一个属性，并确保这个新属性同样是响应式的，且触发视图更新。它必须用于向响应式对象上添加新属性，因为 `Vue` 无法探测普通的新增属性 (比如 `this.myObject.newProperty = 'hi'`)。
+
+```js
+{Object | Array} target
+{string | number} propertyName/index
+{any} value
+注意：对象不能是 Vue 实例，或者 Vue 实例的根数据对象。
+
+vm.$set( target, propertyName/index, value )
+```
+
+实现代码：
+
+```js
+export function set (target, key, val){
+    if (process.env.NODE_ENV !== 'production' &&
+        (isUndef(target) || isPrimitive(target))
+       ) {
+        warn(`Cannot set reactive property on undefined, null, or primitive value: ${(target: any)}`)
+    }
+    // 数组的splice方法已经被我们创建的拦截器重写了，也就是说，当使用splice方法向数组内添加元素时，该元素会自动被变成响应式的。
+    if (Array.isArray(target) && isValidArrayIndex(key)) {
+        target.length = Math.max(target.length, key)
+        target.splice(key, 1, val)
+        return val
+    }
+    // 判断传入的key是否已经存在于target中，如果存在，表明这次操作不是新增属性，而是对已有的属性进行简单的修改值，那么就只修改属性值即可，
+    if (key in target && !(key in Object.prototype)) {
+        target[key] = val
+        return val
+    }
+    // 该属性是否为true标志着target是否为响应式对象，接着判断如果tragte是 Vue 实例，或者是 Vue 实例的根数据对象，则抛出警告并退出程序
+    const ob = (target: any).__ob__
+    if (target._isVue || (ob && ob.vmCount)) {
+        process.env.NODE_ENV !== 'production' && warn(
+            'Avoid adding reactive properties to a Vue instance or its root $data ' +
+            'at runtime - declare it upfront in the data option.'
+        )
+        return val
+    }
+    // 需简单给它添加上新的属性，不用将新属性转化成响应式
+    if (!ob) {
+        target[key] = val
+        return val
+    }
+    // 如果target是对象，并且是响应式，那么就调用defineReactive方法将新属性值添加到target上，defineReactive方会将新属性添加完之后并将其转化成响应式。
+    defineReactive(ob.value, key, val)
+    // 最后通知依赖更新。
+    ob.dep.notify()
+    return val
+}
+```
+
+##### 3、vm.$delete
+
+删除对象的属性。如果对象是响应式的，确保删除能触发更新视图。这个方法主要用于避开 `Vue` 不能检测到属性被删除的限制，但是你应该很少会使用它。
+
+```js
+vm.$delete( target, propertyName/index )
+```
+
+代码实现：
+
+```js
+export function del (target, key) {
+  // 判断在非生产环境下如果传入的target不存在，或者target是原始值，则抛出警告
+  if (process.env.NODE_ENV !== 'production' &&
+    (isUndef(target) || isPrimitive(target))
+  ) {
+    warn(`Cannot delete reactive property on undefined, null, or primitive value: ${(target: any)}`)
+  }
+  // 传入的target是数组并且传入的key是有效索引的话，就使用数组的splice方法将索引key对应的值删掉
+  if (Array.isArray(target) && isValidArrayIndex(key)) {
+    target.splice(key, 1)
+    return
+  }
+  const ob = (target: any).__ob__
+  if (target._isVue || (ob && ob.vmCount)) {
+    process.env.NODE_ENV !== 'production' && warn(
+      'Avoid deleting properties on a Vue instance or its root $data ' +
+      '- just set it to null.'
+    )
+    return
+  }
+  // 判断传入的key是否存在于target中，如果key本来就不存在于target中，那就不用删除，直接退出程序
+  if (!hasOwn(target, key)) {
+    return
+  }
+  delete target[key]
+  if (!ob) {
+    return
+  }
+  // 如果target是对象，并且传入的key也存在于target中，那么就从target中将该属性删除，同时判断当前的target是否为响应式对象，如果是响应式对象，则通知依赖更新
+  ob.dep.notify()
+}
+```
+
+#### 5-2、事件相关
+
+###### 1、vm.$on
+
+监听当前实例上的自定义事件。事件可以由`vm.$emit`触发。回调函数会接收所有传入事件触发函数的额外参数。
+
+```js
+vm.$on( event, callback )
+```
+
+代码实现：
+
+```js
+// 第一个参数是订阅的事件名，可以是数组，表示订阅多个事件。第二个参数是回调函数，当触发所订阅的事件时会执行该回调函数。
+Vue.prototype.$on = function (event, fn) {
+    const vm: Component = this
+    // 如果是数组，就表示需要一次性订阅多个事件，就遍历该数组，将数组中的每一个事件都递归调用$on方法将其作为单个事件订阅
+    if (Array.isArray(event)) {
+        for (let i = 0, l = event.length; i < l; i++) {
+            this.$on(event[i], fn)
+        }
+    } else {
+     // 单个事件名来处理，以该事件名作为key，先尝试在当前实例的_events属性中获取其对应的事件列表，如果获取不到就给其赋空数组为默认值，并将第二个参数回调函数添加进去。
+        (vm._events[event] || (vm._events[event] = [])).push(fn)
+    }
+    return vm
+}
+
+events属性就是用来作为当前实例的事件中心，所有绑定在这个实例上的事件都会存储在事件中心_events属性中。
+export function initEvents (vm: Component) {
+    vm._events = Object.create(null)
+}
+```
+
+###### 2、vm.$emit
+
+触发当前实例上的事件。附加参数都会传给监听器回调。
+
+```js
+vm.$emit( eventName, […args] )
+```
+
+代码实现：
+
+```js
+Vue.prototype.$emit = function (event: string): Component {
+    const vm: Component = this
+    // 根据传入的事件名从当前实例的_events属性（即事件中心）中获取到该事件名所对应的回调函数cbs
+    let cbs = vm._events[event]
+    if (cbs) {
+      cbs = cbs.length > 1 ? toArray(cbs) : cbs
+      const args = toArray(arguments, 1)
+      for (let i = 0, l = cbs.length; i < l; i++) {
+        try {
+          cbs[i].apply(vm, args)
+        } catch (e) {
+          handleError(e, vm, `event handler for "${event}"`)
+        }
+      }
+    }
+    return vm
+  }
+}
+```
+
+###### 3、vm.$off
+
+- 移除自定义事件监听器。
+  - 如果没有提供参数，则移除所有的事件监听器；
+  - 如果只提供了事件，则移除该事件所有的监听器；
+  - 如果同时提供了事件与回调，则只移除这个回调的监听器。
+
+```js
+vm.$off( [event, callback] )
+```
+
+代码实现：
+
+```js
+Vue.prototype.$off = function (event, fn) {
+    const vm: Component = this
+    // 如果没有提供参数，则移除所有的事件监听器。
+    if (!arguments.length) {
+        vm._events = Object.create(null)
+        return vm
+    }
+    // 传入的需要移除的事件名是一个数组，就表示需要一次性移除多个事件，那么我们只需同订阅多个事件一样，遍历该数组，然后将数组中的每一个事件都递归调用$off方法进行移除即可。
+    if (Array.isArray(event)) {
+        for (let i = 0, l = event.length; i < l; i++) {
+            this.$off(event[i], fn)
+        }
+        return vm
+    }
+    // 判断如果cbs不存在，那表明在事件中心从来没有订阅过该事件。直接返回
+    const cbs = vm._events[event]
+    if (!cbs) {
+        return vm
+    }
+    // 如果只提供了事件，则移除该事件所有的监听器。这个也不难，我们知道，在事件中心里面，一个事件名对应的回调函数是一个数组，要想移除所有的回调函数我们只需把它对应的数组设置为null即可
+    if (!fn) {
+        vm._events[event] = null
+        return vm
+    }
+    // 同时提供了事件与回调，则只移除这个回调的监听器。那么我们只需遍历所有回调函数数组cbs，如果cbs中某一项与fn相同，或者某一项的fn属性与fn相同，那么就将其从数组中删除即可
+    if (fn) {
+        // specific handler
+        let cb
+        let i = cbs.length
+        while (i--) {
+            cb = cbs[i]
+            if (cb === fn || cb.fn === fn) {
+                cbs.splice(i, 1)
+                break
+            }
+        }
+    }
+    return vm
+}
+```
+
+4、vm.$once
+
+监听一个自定义事件，但是只触发一次。一旦触发之后，监听器就会被移除。
+
+```js
+vm.$once( event, callback )
+```
+
+代码实现：
+
+```js
+Vue.prototype.$once = function (event, fn) {
+    const vm: Component = this
+    // 通过$off方法移除订阅的事件，这样确保该事件不会被再次触发，接着执行原本的回调fn
+    function on () {
+        vm.$off(event, on)
+        fn.apply(vm, arguments)
+    }
+    // on上绑定一个fn属性，属性值为用户传入的回调fn，这样在使用$off移除事件的时候，$off内部会判断如果回调函数列表中某一项的fn属性与fn相同时，就可以成功移除事件了
+    /**
+    if (cb === fn || cb.fn === fn) {
+        cbs.splice(i, 1)
+        break
+    }
+    */
+    on.fn = fn
+    vm.$on(event, on)
+    return vm
+}
+```
+
+#### 5-3、生命周期相关
+
+###### 1、vm.$mount
+
+如果 `Vue` 实例在实例化时没有收到 el 选项，则它处于“未挂载”状态，没有关联的 DOM 元素。可以使用 `vm.$mount()` 手动地挂载一个未挂载的实例。
+
+如果没有提供 `elementOrSelector` 参数，模板将被渲染为文档之外的的元素，并且你必须使用原生 `DOM API`把它插入文档中。
+
+这个方法返回实例自身，因而可以链式调用其它实例方法。
+
+```js
+vm.$mount( [elementOrSelector] )
+```
+
+###### 2、vm.$forceUpdate
+
+迫使 `Vue` 实例重新渲染。注意它仅仅影响实例本身和插入插槽内容的子组件，而不是所有子组件。
+
+```js
+vm.$forceUpdate()
+```
+
+代码实现：
+
+```js
+Vue.prototype.$forceUpdate = function () {
+    const vm: Component = this
+    // 当前实例的_watcher属性就是该实例的watcher，所以要想让实例重新渲染，我们只需手动的去执行一下实例watcher的update方法即可。
+    if (vm._watcher) {
+        vm._watcher.update()
+    }
+}
+```
+
+###### 3、vm.$nextTick
+
+将回调延迟到下次 DOM 更新循环之后执行。在修改数据之后立即使用它，然后等待 DOM 更新。它跟全局方法 `Vue.nextTick` 一样，不同的是回调的 `this` 自动绑定到调用它的实例上。
+
+```js
+vm.$nextTick( [callback] )
+```
+
+ `JS` 执行是单线程的，它是基于事件循环的。事件循环大致分为以下几个步骤：
+
+1. 所有同步任务都在主线程上执行，形成一个执行栈（`execution context stack`）。
+2. 主线程之外，还存在一个"任务队列"（`task queue`）。只要异步任务有了运行结果，就在"任务队列"之中放置一个事件。
+3. 一旦"执行栈"中的所有同步任务执行完毕，系统就会读取"任务队列"，看看里面有哪些事件。那些对应的异步任务，于是结束等待状态，进入执行栈，开始执行。
+4. 主线程不断重复上面的第三步。
+
+主线程的执行过程就是一个 `tick`，而所有的异步结果都是通过 “任务队列” 来调度。 任务队列中存放的是一个个的任务（`task`）。 规范中规定 `task` 分为两大类，分别是宏任务(`macro task`) 和微任务(`micro task`），并且每执行完一个个宏任务(`macro task`)后，都要去清空该宏任务所对应的微任务队列中所有的微任务(`micro task`）。
+
+```js
+for (macroTask of macroTaskQueue) {
+    // 1. 处理当前的宏任务
+    handleMacroTask();
+
+    // 2. 处理对应的所有微任务
+    for (microTask of microTaskQueue) {
+        handleMicroTask(microTask);
+    }
+}
+```
+
+在浏览器环境中，常见的
+
+- 宏任务(`macro task`) 有 `setTimeout`、`MessageChannel`、`postMessage`、`setImmediate`；
+- 微任务(`micro task`）有`MutationObsever` 和 `Promise.then`。
+
+代码实现：
+
+1. 能力检测
+2. 根据能力检测以不同方式执行回调队列
+
+能力检测
+
+`Vue` 在内部对异步队列尝试使用原生的 `Promise.then`、`MutationObserver` 和 `setImmediate`，如果执行环境不支持，则会采用 `setTimeout(fn, 0)` 代替。
+
+宏任务耗费的时间是大于微任务的，所以在浏览器支持的情况下，优先使用微任务。如果浏览器不支持微任务，使用宏任务；但是，各种宏任务之间也有效率的不同，需要根据浏览器的支持情况，使用不同的宏任务。
+
+```js
+let microTimerFunc
+let macroTimerFunc
+let useMacroTask = false
+
+/* 对于宏任务(macro task) */
+// 检测是否支持原生 setImmediate(高版本 IE 和 Edge 支持)
+if (typeof setImmediate !== 'undefined' && isNative(setImmediate)) {
+    macroTimerFunc = () => {
+        setImmediate(flushCallbacks)
+    }
+}
+// 检测是否支持原生的 MessageChannel
+else if (typeof MessageChannel !== 'undefined' && (
+    isNative(MessageChannel) ||
+    // PhantomJS
+    MessageChannel.toString() === '[object MessageChannelConstructor]'
+)) {
+    const channel = new MessageChannel()
+    const port = channel.port2
+    channel.port1.onmessage = flushCallbacks
+    macroTimerFunc = () => {
+        port.postMessage(1)
+    }
+}
+// 都不支持的情况下，使用setTimeout
+else {
+    macroTimerFunc = () => {
+        setTimeout(flushCallbacks, 0)
+    }
+}
+
+/* 对于微任务(micro task) */
+// 检测浏览器是否原生支持 Promise
+if (typeof Promise !== 'undefined' && isNative(Promise)) {
+    const p = Promise.resolve()
+    microTimerFunc = () => {
+        p.then(flushCallbacks)
+    }
+}
+// 不支持的话直接指向 macro task 的实现。
+else {
+    // fallback to macro
+    microTimerFunc = macroTimerFunc
+}
+```
+
+执行回调队列
+
+先把传入的回调函数 `cb` 推入 回调队列`callbacks` 数组，同时在接收第一个回调函数时，执行能力检测中对应的异步方法（异步方法中调用了回调函数队列）。最后一次性地根据 `useMacroTask` 条件执行 `macroTimerFunc` 或者是 `microTimerFunc`，而它们都会在下一个 tick 执行 `flushCallbacks`，`flushCallbacks` 的逻辑非常简单，对 `callbacks` 遍历，然后执行相应的回调函数
+
+```js
+const callbacks = []   // 回调队列
+let pending = false    // 异步锁
+
+// 执行队列中的每一个回调
+function flushCallbacks () {
+    pending = false     // 重置异步锁
+    // 防止出现nextTick中包含nextTick时出现问题，在执行回调函数队列前，提前复制备份并清空回调函数队列，防止造成死循环
+    const copies = callbacks.slice(0)
+    callbacks.length = 0
+    // 执行回调函数队列
+    for (let i = 0; i < copies.length; i++) {
+        copies[i]()
+    }
+}
+
+export function nextTick (cb?: Function, ctx?: Object) {
+    let _resolve
+    // 将回调函数推入回调队列
+    callbacks.push(() => {
+        if (cb) {
+            try {
+                cb.call(ctx)
+            } catch (e) {
+                handleError(e, ctx, 'nextTick')
+            }
+        } else if (_resolve) {
+            _resolve(ctx)
+        }
+    })
+    // 如果异步锁未锁上，锁上异步锁，调用异步函数，准备等同步函数执行完后，就开始执行回调函数队列
+    if (!pending) {
+        pending = true
+        // 执行宏任务
+        if (useMacroTask) {
+            macroTimerFunc()
+        } else {
+            // 执行微任务
+            microTimerFunc()
+        }
+    }
+    // 如果没有提供回调，并且支持Promise，返回一个Promise
+    if (!cb && typeof Promise !== 'undefined') {
+        return new Promise(resolve => {
+            _resolve = resolve
+        })
+    }
+}
+```
+
+###### 4、vm.$destory
+
+完全销毁一个实例。清理它与其它实例的连接，解绑它的全部指令及事件监听器。
+
+触发 `beforeDestroy` 和 `destroyed` 的钩子。
+
+```js
+vm.$destroy()
+```
+
+## 6、全局API
+
+与实例方法不同，实例方法是将方法挂载到`Vue`的原型上，而全局API是直接在`Vue`上挂载方法。在`Vue`中，全局API一共有12个，分别是`Vue.extend`、`Vue.nextTick`、`Vue.set`、`Vue.delete`、`Vue.directive`、`Vue.filter`、`Vue.component`、`Vue.use`、`Vue.mixin`、`Vue.observable`、`Vue.version`。
+
+###### 1、Vue.extend
+
+使用基础 `Vue` 构造器，创建一个“子类”。参数是一个包含组件选项的对象。`data` 选项是特例，需要注意 - 在 `Vue.extend()` 中它必须是函数。既然是`Vue`类的子类，那么除了它本身独有的一些属性方法，还有一些是从`Vue`类中继承而来，所以创建子类的过程其实就是一边给子类上添加上独有的属性，一边将父类的公共属性复制到子类上。
+
+代码实现：
+
+```js
+Vue.extend = function (extendOptions: Object): Function {
+    // 用户传入的一个包含组件选项的对象参数；
+    extendOptions = extendOptions || {}
+    // 指向父类，即基础 Vue类；
+    const Super = this
+    // 父类的cid属性，无论是基础 Vue类还是从基础 Vue类继承而来的类，都有一个cid属性，作为该类的唯一标识；
+    const SuperId = Super.cid
+    // 缓存池，用于缓存创建出来的类
+    const cachedCtors = extendOptions._Ctor || (extendOptions._Ctor = {})
+    if (cachedCtors[SuperId]) {
+        return cachedCtors[SuperId]
+    }
+		
+    // 获取option name并校验name是否有效
+    const name = extendOptions.name || Super.options.name
+    if (process.env.NODE_ENV !== 'production' && name) {
+        validateComponentName(name)
+    }
+		
+    // 创建sub类
+    const Sub = function VueComponent (options) {
+        this._init(options)
+    }
+    // 将父类的原型继承到子类中，并且为子类添加唯一标识cid
+    Sub.prototype = Object.create(Super.prototype)
+    Sub.prototype.constructor = Sub
+    Sub.cid = cid++
+    // 将父类的option与子类的option合并
+    Sub.options = mergeOptions(
+        Super.options,
+        extendOptions
+    )
+    // 将父类保存到子类的super属性中，以确保在子类中能够拿到父类
+    Sub['super'] = Super
+
+    // 初始化属性,初始化props属性其实就是把参数中传入的props选项代理到原型的_props中
+    if (Sub.options.props) {
+        initProps(Sub)
+        /**
+        * function initProps (Comp) {
+          const props = Comp.options.props
+          for (const key in props) {
+            proxy(Comp.prototype, `_props`, key)
+          }
+        }
+        */
+    }
+    // 初始化props属性就是遍历参数中传入的computed选项，将每一项都调用defineComputed函数定义到子类原型上。
+    if (Sub.options.computed) {
+        initComputed(Sub)
+        /**
+        function initComputed (Comp) {
+          const computed = Comp.options.computed
+          for (const key in computed) {
+            defineComputed(Comp.prototype, key, computed[key])
+          }
+        }
+        */
+    }
+
+    // allow further extension/mixin/plugin usage
+    Sub.extend = Super.extend
+    Sub.mixin = Super.mixin
+    Sub.use = Super.use
+
+    ASSET_TYPES.forEach(function (type) {
+        Sub[type] = Super[type]
+    })
+    // enable recursive self-lookup
+    if (name) {
+        Sub.options.components[name] = Sub
+    }
+		
+    // 子类新增三个独有的属性
+    Sub.superOptions = Super.options
+    Sub.extendOptions = extendOptions
+    Sub.sealedOptions = extend({}, Sub.options)
+
+    // cache constructor
+    cachedCtors[SuperId] = Sub
+    return Sub
+}
+```
+
+###### 2、Vue.nextTick
+
+在下次 DOM 更新循环结束之后执行延迟回调。在修改数据之后立即使用这个方法，获取更新后的 DOM。该API的原理同实例方法 `$nextTick`原理一样，此处不再重复。唯一不同的是实例方法 `$nextTick` 中回调的 `this` 绑定在调用它的实例上。
+
+###### 3、Vue.set
+
+向响应式对象中添加一个属性，并确保这个新属性同样是响应式的，且触发视图更新。它必须用于向响应式对象上添加新属性，因为 Vue 无法探测普通的新增属性 (比如 `this.myObject.newProperty = 'hi'`)。该API的原理同实例方法 `$set`原理一样，此处不再重复。
+
+###### 4、Vue.detele
+
+该API的原理同实例方法 `$delete`原理一样，此处不再重复。
+
+###### 5、Vue.directive
+
+注册或获取全局指令。
+
+```js
+Vue.directive( id, [definition] )
+// 注册
+Vue.directive('my-directive', {
+  bind: function () {},
+  inserted: function () {},
+  update: function () {},
+  componentUpdated: function () {},
+  unbind: function () {}
+})
+
+// 注册 (指令函数)
+Vue.directive('my-directive', function () {
+  // 这里将会被 `bind` 和 `update` 调用
+})
+
+// getter，返回已注册的指令
+var myDirective = Vue.directive('my-directive')
+```
+
+代码实现：
+
+```js
+Vue.options = Object.create(null)
+Vue.options['directives'] = Object.create(null)
+
+Vue.directive= function (id,definition) {
+    // 如果没有传入definition参数，则表示为获取指令，那么就从存放指令的地方根据指令id来读取指令并返回（局部指令）
+    if (!definition) {
+        return this.options['directives'][id]
+    } else {
+        // 全局指令
+        if (type === 'directive' && typeof definition === 'function') {
+            definition = { bind: definition, update: definition }
+        }
+        // 如果definition参数不是一个函数，那么即认为它是用户自定义的指令对象，直接将其保存在this.options['directives']中。
+        this.options['directives'][id] = definition
+        return definition
+    }
+}
+```
+
+###### 6、Vue.filter
+
+`Vue.options['filters']`是用来存放全局过滤器的地方。还是根据是否传入了`definition`参数来决定本次操作是注册过滤器还是获取过滤器。如果没有传入`definition`参数，则表示本次操作为获取过滤器，那么就从存放过滤器的地方根据过滤器`id`来读取过滤器并返回；如果传入了`definition`参数，则表示本次操作为注册过滤器，那就直接将其保存在`this.options['filters']`中。
+
+```js
+Vue.options = Object.create(null)
+Vue.options['filters'] = Object.create(null)
+
+Vue.filter= function (id,definition) {
+    if (!definition) {
+        return this.options['filters'][id]
+    } else {
+        this.options['filters'][id] = definition
+        return definition
+    }
+}
+```
+
+###### 7、Vue.component
+
+注册或获取全局组件。注册还会自动使用给定的`id`设置组件的名称。
+
+```js
+// 注册组件，传入一个扩展过的构造器
+Vue.component('my-component', Vue.extend({ /* ... */ }))
+
+// 注册组件，传入一个选项对象 (自动调用 Vue.extend)
+Vue.component('my-component', { /* ... */ })
+
+// 获取注册的组件 (始终返回构造器)
+var MyComponent = Vue.component('my-component')
+```
+
+代码实现：
+
+```js
+Vue.options = Object.create(null)
+Vue.options['components'] = Object.create(null)
+
+Vue.component= function (id,definition) {
+    if (!definition) {
+        return this.options['components'][id]
+    } else {
+        if (process.env.NODE_ENV !== 'production' && type === 'component') {
+            validateComponentName(id)
+        }
+        // 判断传入的definition参数是否是一个对象，如果是对象，则使用Vue.extend方法将其变为Vue的子类，同时如果definition对象中不存在name属性时，则使用组件id作为组件的name属性。
+        if (type === 'component' && isPlainObject(definition)) {
+            definition.name = definition.name || id
+            definition = this.options._base.extend(definition)
+        }
+        this.options['components'][id] = definition
+        return definition
+    }
+}
+```
+
+directive、filter、component小结
+
+```javascript
+export const ASSET_TYPES = [
+  'component',
+  'directive',
+  'filter'
+]
+
+Vue.options = Object.create(null)
+ASSET_TYPES.forEach(type => {
+    Vue.options[type + 's'] = Object.create(null)
+})
+
+ASSET_TYPES.forEach(type => {
+    Vue[type] = function (id,definition) {
+        if (!definition) {
+            return this.options[type + 's'][id]
+        } else {
+            if (process.env.NODE_ENV !== 'production' && type === 'component') {
+                validateComponentName(id)
+            }
+            if (type === 'component' && isPlainObject(definition)) {
+                definition.name = definition.name || id
+                definition = this.options._base.extend(definition)
+            }
+            if (type === 'directive' && typeof definition === 'function') {
+                definition = { bind: definition, update: definition }
+            }
+            this.options[type + 's'][id] = definition
+            return definition
+        }
+    }
+})
+```
+
+###### 8、Vue.use
+
+安装 Vue.js 插件。如果插件是一个对象，必须提供 `install` 方法。如果插件是一个函数，它会被作为 install 方法。install 方法调用时，会将 `Vue` 作为参数传入。
+
+该方法需要在调用 `new Vue()` 之前被调用。
+
+当 `install` 方法被同一个插件多次调用，插件将只会被安装一次。
+
+代码实现：
+
+```js
+Vue.use = function (plugin) {
+    // 判断插件是否已经安装过，如果已经安装过，直接返回
+    const installedPlugins = (this._installedPlugins || (this._installedPlugins = []))
+    if (installedPlugins.indexOf(plugin) > -1) {
+        return this
+    }
+
+    // 将Vue插入到该数组的第一个位置，这是因为在后续调用install方法时，Vue必须作为第一个参数传入。
+    const args = toArray(arguments, 1)
+    args.unshift(this)
+    // 如果是一个提供了 install 方法的对象，那么就执行该对象中提供的 install 方法并传入参数完成插件安装。
+    if (typeof plugin.install === 'function') {
+        plugin.install.apply(plugin, args)
+    } 
+    // 如果传入的插件是一个函数，那么就把这个函数当作install方法执行，同时传入参数完成插件安装
+    else if (typeof plugin === 'function') {
+        plugin.apply(null, args)
+    }
+    installedPlugins.push(plugin)
+    return this
+}
+```
+
+###### 9、Vue.mixin
+
+全局注册一个混入，影响注册之后所有创建的每个 Vue 实例。插件作者可以使用混入，向组件注入自定义的行为。
+
+代码实现：
+
+```js
+Vue.mixin = function (mixin: Object) {
+    this.options = mergeOptions(this.options, mixin)
+    return this
+}
+```
+
+###### 10、Vue.observable
+
+让一个对象可响应。Vue 内部会用它来处理 `data` 函数返回的对象。内部是调用了`observe`方法。
+
+```js
+const state = Vue.observable({ count: 0 })
+
+const Demo = {
+  render(h) {
+    return h('button', {
+      on: { click: () => { state.count++ }}
+    }, `count is: ${state.count}`)
+  }
+}
+```
+
+###### 11、Vue.version
+
+提供字符串形式的 Vue 安装版本号。这对社区的插件和组件来说非常有用，你可以根据不同的版本号采取不同的策略。该API是在构建时读取了`package.json`中的`version`字段，然后将其赋值给`Vue.version`。
+
+## 7、过滤器
+
+过滤器有两种使用方式，分别是在双花括号插值中和在 v-bind 表达式中。无论是哪种使用方式，它的使用形式都是`表达式 | 过滤器1 | 过滤器2 | ...`，所谓过滤器本质上就是一个`JS`函数，所以我们在使用过滤器的时候还可以给过滤器传入参数，过滤器接收的第一个参数永远是表达式的值，或者是前一个过滤器处理后的结果，后续其余的参数可以被用于过滤器内部的过滤规则中。
+
+假如有如下过滤器
+
+```js
+{{ message | capitalize }}
+
+filters: {
+    capitalize: function (value) {
+        if (!value) return ''
+        value = value.toString()
+        return value.charAt(0).toUpperCase() + value.slice(1)
+    }
+}
+
+// 那么它被编译成渲染函数字符串后，会变成这个样子
+_f("capitalize")(message) // 对应的resolveFilter函数
+```
+
+###### resolveFilter函数
+
+```js
+import { identity, resolveAsset } from 'core/util/index'
+
+export function resolveFilter (id) {
+  return resolveAsset(this.$options, 'filters', id, true) || identity
+}
+
+/**
+* options 当前实例的$options属性
+* type type为filters
+* id id为当前过滤器的id
+* warnMissing
+*/
+export function resolveAsset (options,type,id,warnMissing) {
+  if (typeof id !== 'string') {
+    return
+  }
+  // 获取所有options的过滤器
+  const assets = options[type]
+  // 先从本地注册中查找
+  if (hasOwn(assets, id)) return assets[id]
+  // 将过滤器id转化成驼峰式后再次查找
+  const camelizedId = camelize(id)
+  if (hasOwn(assets, camelizedId)) return assets[camelizedId]
+  // 过滤器id转化成首字母大写后再次查找
+  const PascalCaseId = capitalize(camelizedId)
+  if (hasOwn(assets, PascalCaseId)) return assets[PascalCaseId]
+  // 再从原型链中查找
+  const res = assets[id] || assets[camelizedId] || assets[PascalCaseId]
+  if (process.env.NODE_ENV !== 'production' && warnMissing && !res) {
+    warn(
+      'Failed to resolve ' + type.slice(0, -1) + ': ' + id,
+      options
+    )
+  }
+  return res
+}
+```
+
+###### 解析过滤器
+
+用户所写的模板会被三个解析器所解析，分别是`HTML`解析器`parseHTML`、文本解析器`parseText`和过滤器解析器`parseFilters`。其中`HTML`解析器是主线，在使用`HTML`解析器`parseHTML`函数解析模板中`HTML`标签的过程中，如果遇到文本信息，就会调用文本解析器`parseText`函数进行文本解析；如果遇到文本中包含过滤器，就会调用过滤器解析器`parseFilters`函数进行解析。
+
+###### parseFilters函数
+
+```js
+// 该函数的作用的是将传入的形如'message | capitalize'这样的过滤器字符串转化成_f("capitalize")(message)
+export function parseFilters (exp) {
+  let inSingle = false                     // exp是否在 '' 中
+  let inDouble = false                     // exp是否在 "" 中
+  let inTemplateString = false             // exp是否在 `` 中
+  let inRegex = false                      // exp是否在 \\ 中
+  let curly = 0                            // 在exp中发现一个 { 则curly加1，发现一个 } 则curly减1，直到culy为0 说明 { ... }闭合
+  let square = 0                           // 在exp中发现一个 [ 则curly加1，发现一个 ] 则curly减1，直到culy为0 说明 [ ... ]闭合
+  let paren = 0                            // 在exp中发现一个 ( 则curly加1，发现一个 ) 则curly减1，直到culy为0 说明 ( ... )闭合
+  let lastFilterIndex = 0
+  let c, prev, i, expression, filters
+
+
+  for (i = 0; i < exp.length; i++) {
+    prev = c
+    c = exp.charCodeAt(i)
+    if (inSingle) {
+      if (c === 0x27 && prev !== 0x5C) inSingle = false
+    } else if (inDouble) {
+      if (c === 0x22 && prev !== 0x5C) inDouble = false
+    } else if (inTemplateString) {
+      if (c === 0x60 && prev !== 0x5C) inTemplateString = false
+    } else if (inRegex) {
+      if (c === 0x2f && prev !== 0x5C) inRegex = false
+    } else if (
+      c === 0x7C && // pipe
+      exp.charCodeAt(i + 1) !== 0x7C &&
+      exp.charCodeAt(i - 1) !== 0x7C &&
+      !curly && !square && !paren
+    ) {
+      if (expression === undefined) {
+        // first filter, end of expression
+        lastFilterIndex = i + 1
+        expression = exp.slice(0, i).trim()
+      } else {
+        pushFilter()
+      }
+    } else {
+      switch (c) {
+        case 0x22: inDouble = true; break         // "
+        case 0x27: inSingle = true; break         // '
+        case 0x60: inTemplateString = true; break // `
+        case 0x28: paren++; break                 // (
+        case 0x29: paren--; break                 // )
+        case 0x5B: square++; break                // [
+        case 0x5D: square--; break                // ]
+        case 0x7B: curly++; break                 // {
+        case 0x7D: curly--; break                 // }
+      }
+      if (c === 0x2f) { // /
+        let j = i - 1
+        let p
+        // find first non-whitespace prev char
+        for (; j >= 0; j--) {
+          p = exp.charAt(j)
+          if (p !== ' ') break
+        }
+        if (!p || !validDivisionCharRE.test(p)) {
+          inRegex = true
+        }
+      }
+    }
+  }
+
+  if (expression === undefined) {
+    expression = exp.slice(0, i).trim()
+  } else if (lastFilterIndex !== 0) {
+    pushFilter()
+  }
+
+  function pushFilter () {
+    (filters || (filters = [])).push(exp.slice(lastFilterIndex, i).trim())
+    lastFilterIndex = i + 1
+  }
+
+  if (filters) {
+    for (i = 0; i < filters.length; i++) {
+      expression = wrapFilter(expression, filters[i])
+    }
+  }
+
+  return expression
+}
+
+// 解析得到的每个过滤器中查找是否有(，以此来判断过滤器中是否接收了参数，如果没有(，表示该过滤器没有接收参数，则直接构造_f函数调用字符串即_f("filter1")(message)并返回赋给expression
+function wrapFilter (exp: string, filter: string): string {
+  const i = filter.indexOf('(')
+  if (i < 0) {
+    // _f: resolveFilter
+    return `_f("${filter}")(${exp})`
+  } else {
+    const name = filter.slice(0, i)
+    const args = filter.slice(i + 1)
+    return `_f("${name}")(${exp}${args !== ')' ? ',' + args : args}`
+  }
+}
+```
+
+函数接收一个形如`'message | capitalize'`这样的过滤器字符串作为，最终将其转化成`_f("capitalize")(message)`输出。在`parseFilters`函数的内部是通过遍历传入的过滤器字符串每一个字符，根据每一个字符是否是一些特殊的字符从而作出不同的处理，最终，从传入的过滤器字符串中解析出待处理的表达式`expression`和所有的过滤器`filters`数组。
+
+最后，将解析得到的`expression`和`filters`数组通过调用`wrapFilter`函数将其构造成`_f`函数调用字符串。
+
+## 8、指令
+
+###### 1、何时生效
+
+我们知道，指令是作为标签属性写在模板中的`HTML`标签上的，那么又回到那句老话了，既然是写在模板中的，那它必然会经过模板编译，编译之后会产生虚拟`DOM`，在虚拟`DOM`渲染更新时，除了更新节点的内容之外，节点上的一些指令、事件等内容也需要更新。在虚拟`DOM`渲染更新的`create`、`update`、`destory`阶段都得处理指令逻辑，所以我们需要监听这三个钩子函数来处理指令逻辑。
+
+```js
+export default {
+  create: updateDirectives,
+  update: updateDirectives,
+  destroy: function unbindDirectives (vnode: VNodeWithData) {
+    updateDirectives(vnode, emptyNode)
+  }
+}
+```
+
+2、
+
+## 9、内置组件
