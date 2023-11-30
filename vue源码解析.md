@@ -3344,7 +3344,7 @@ filters: {
 _f("capitalize")(message) // 对应的resolveFilter函数
 ```
 
-###### resolveFilter函数
+###### 1、resolveFilter函数
 
 ```js
 import { identity, resolveAsset } from 'core/util/index'
@@ -3385,11 +3385,11 @@ export function resolveAsset (options,type,id,warnMissing) {
 }
 ```
 
-###### 解析过滤器
+###### 2、解析过滤器
 
 用户所写的模板会被三个解析器所解析，分别是`HTML`解析器`parseHTML`、文本解析器`parseText`和过滤器解析器`parseFilters`。其中`HTML`解析器是主线，在使用`HTML`解析器`parseHTML`函数解析模板中`HTML`标签的过程中，如果遇到文本信息，就会调用文本解析器`parseText`函数进行文本解析；如果遇到文本中包含过滤器，就会调用过滤器解析器`parseFilters`函数进行解析。
 
-###### parseFilters函数
+###### 3、parseFilters函数
 
 ```js
 // 该函数的作用的是将传入的形如'message | capitalize'这样的过滤器字符串转化成_f("capitalize")(message)
@@ -3510,6 +3510,247 @@ export default {
 }
 ```
 
-2、
+###### 2、指令钩子函数
+
+`Vue`对于自定义指令定义对象提供了几个钩子函数，这几个钩子函数分别对应着指令的几种状态，一个指令从第一次被绑定到元素上到最终与被绑定的元素解绑，它会经过以下几种状态：
+
+- bind：只调用一次，指令第一次绑定到元素时调用。在这里可以进行一次性的初始化设置。
+- inserted：被绑定元素插入父节点时调用 (仅保证父节点存在，但不一定已被插入文档中)。
+- update：所在组件的 VNode 更新时调用，**但是可能发生在其子 VNode 更新之前**。
+- componentUpdated：指令所在组件的 VNode **及其子 VNode** 全部更新后调用。
+- unbind：只调用一次，指令与元素解绑时调用。
+
+###### 3、如何生效
+
+代码实现：
+
+```js
+function updateDirectives (oldVnode: VNodeWithData, vnode: VNodeWithData) {
+  if (oldVnode.data.directives || vnode.data.directives) {
+    _update(oldVnode, vnode)
+  }
+}
+
+function _update (oldVnode, vnode) {
+  // 判断当前节点vnode对应的旧节点oldVnode是不是一个空节点，如果是的话，表明当前节点是一个新创建的节点。
+  const isCreate = oldVnode === emptyNode
+  // 判断当前节点vnode是不是一个空节点，如果是的话，表明当前节点对应的旧节点将要被销毁。
+  const isDestroy = vnode === emptyNode
+  // 旧的指令集合，即oldVnode中保存的指令。
+  const oldDirs = normalizeDirectives(oldVnode.data.directives, oldVnode.context)
+  // 新的指令集合，即vnode中保存的指令。
+  const newDirs = normalizeDirectives(vnode.data.directives, vnode.context)
+	// 保存需要触发inserted指令钩子函数的指令列表。
+  const dirsWithInsert = []
+  // 保存需要触发componentUpdated指令钩子函数的指令列表。
+  const dirsWithPostpatch = []
+
+  let key, oldDir, dir
+  for (key in newDirs) {
+    oldDir = oldDirs[key]
+    dir = newDirs[key]
+    // / 判断当前循环到的指令名`key`在旧的指令列表`oldDirs`中是否存在，如果不存在，那么说明这是一个新的指令
+    if (!oldDir) {
+      // new directive, bind
+      callHook(dir, 'bind', vnode, oldVnode)
+      // 如果定义了inserted 时的钩子函数 那么将该指令添加到dirsWithInsert中
+      if (dir.def && dir.def.inserted) {
+        dirsWithInsert.push(dir)
+      }
+    } else {
+      // existing directive, update
+      dir.oldValue = oldDir.value
+      dir.oldArg = oldDir.arg
+      callHook(dir, 'update', vnode, oldVnode)
+      if (dir.def && dir.def.componentUpdated) {
+        dirsWithPostpatch.push(dir)
+      }
+    }
+  }
+
+  if (dirsWithInsert.length) {
+    const callInsert = () => {
+      for (let i = 0; i < dirsWithInsert.length; i++) {
+        callHook(dirsWithInsert[i], 'inserted', vnode, oldVnode)
+      }
+    }
+    if (isCreate) {
+      mergeVNodeHook(vnode, 'insert', callInsert)
+    } else {
+      callInsert()
+    }
+  }
+  if (dirsWithPostpatch.length) {
+    // 当一个新创建的元素被插入到父节点中时虚拟DOM渲染更新的insert钩子函数和指令的inserted钩子函数都要被触发。既然如此，那就可以把这两个钩子函数通过调用mergeVNodeHook方法进行合并，然后统一在虚拟DOM渲染更新的insert钩子函数中触发，这样就保证了元素确实被插入到父节点中才执行的指令的inserted钩子函数
+    mergeVNodeHook(vnode, 'postpatch', () => {
+      for (let i = 0; i < dirsWithPostpatch.length; i++) {
+        callHook(dirsWithPostpatch[i], 'componentUpdated', vnode, oldVnode)
+      }
+    })
+  }
+
+  if (!isCreate) {
+    for (key in oldDirs) {
+      if (!newDirs[key]) {
+        // no longer present, unbind
+        callHook(oldDirs[key], 'unbind', oldVnode, oldVnode, isDestroy)
+      }
+    }
+  }
+}
+```
 
 ## 9、内置组件
+
+##### 9-1、keep-alive
+
+###### 1、用法
+
+`<keep-alive>`组件可接收三个属性：
+
+- `include` - 字符串或正则表达式。只有名称匹配的组件会被缓存。
+- `exclude` - 字符串或正则表达式。任何名称匹配的组件都不会被缓存。
+- `max` - 数字。最多可以缓存多少组件实例。
+
+匹配时首先检查组件自身的 `name` 选项，如果 `name` 选项不可用，则匹配它的局部注册名称 (父组件 `components` 选项的键值)，也就是组件的标签值。匿名组件不能被匹配。
+
+```js
+<!-- 逗号分隔字符串 -->
+<keep-alive include="a,b">
+  <component :is="view"></component>
+</keep-alive>
+
+<!-- 正则表达式 (使用 `v-bind`) -->
+<keep-alive :include="/a|b/">
+  <component :is="view"></component>
+</keep-alive>
+
+<!-- 数组 (使用 `v-bind`) -->
+<keep-alive :include="['a', 'b']">
+  <component :is="view"></component>
+</keep-alive>
+```
+
+`max`表示最多可以缓存多少组件实例。一旦这个数字达到了，在新实例被创建之前，**已缓存组件中最久没有被访问的实例**会被销毁掉。
+
+###### 2、代码实现
+
+```js
+export default {
+  name: 'keep-alive',
+  abstract: true, // 抽象组件
+
+  props: {
+    include: [String, RegExp, Array],
+    exclude: [String, RegExp, Array],
+    max: [String, Number]
+  },
+
+  created () {
+    this.cache = Object.create(null)
+    this.keys = []
+  },
+
+  // 当<keep-alive>组件被销毁时，此时会调用destroyed钩子函数，在该钩子函数里会遍历this.cache对象，然后将那些被缓存的并且当前没有处于被渲染状态的组件都销毁掉并将其从this.cache对象中剔除。
+  destroyed () {
+    for (const key in this.cache) {
+      pruneCacheEntry(this.cache, key, this.keys)
+    }
+  },
+
+  mounted () {
+    this.$watch('include', val => {
+      pruneCache(this, name => matches(val, name))
+    })
+    this.$watch('exclude', val => {
+      pruneCache(this, name => !matches(val, name))
+    })
+  },
+
+  render() {
+    /* 获取默认插槽中的第一个组件节点 */
+    const slot = this.$slots.default
+    const vnode = getFirstComponentChild(slot)
+    /* 获取该组件节点的componentOptions */
+    const componentOptions = vnode && vnode.componentOptions
+
+    if (componentOptions) {
+      /* 获取该组件节点的名称，优先获取组件的name字段，如果name不存在则获取组件的tag */
+      const name = getComponentName(componentOptions)
+      const { include, exclude } = this
+      /* 如果name不在inlcude中或者存在于exlude中则表示不缓存，直接返回vnode */
+      if (
+        (include && (!name || !matches(include, name))) ||
+        // excluded
+        (exclude && name && matches(exclude, name))
+      ) {
+        return vnode
+      }
+
+      const { cache, keys } = this
+      const key = vnode.key == null
+        ? componentOptions.Ctor.cid + (componentOptions.tag ? `::${componentOptions.tag}` : '')
+        : vnode.key
+      /* 如果命中缓存，则直接从缓存中拿 vnode 的组件实例 */
+      if (cache[key]) {
+        vnode.componentInstance = cache[key].componentInstance
+				/* 调整该组件key的顺序，将其从原来的地方删掉并重新放在最后一个 */          
+        remove(keys, key)
+        keys.push(key)
+      } else {
+        /* 如果没有命中缓存，则将其设置进缓存 */
+        cache[key] = vnode
+        keys.push(key)
+         /* 如果配置了max并且缓存的长度超过了this.max，则从缓存中删除第一个 */
+        if (this.max && keys.length > parseInt(this.max)) {
+          pruneCacheEntry(cache, keys[0], keys, this._vnode)
+        }
+      }
+
+      vnode.data.keepAlive = true
+    }
+    return vnode || (slot && slot[0])
+  }
+}
+```
+
+在该函数内对`this.cache`对象进行遍历，取出每一项的`name`值，用其与新的缓存规则进行匹配，如果匹配不上，则表示在新的缓存规则下该组件已经不需要被缓存，则调用`pruneCacheEntry`函数将这个已经不需要缓存的组件实例先销毁掉，然后再将其从`this.cache`对象中剔除。
+
+```js
+function pruneCache (keepAliveInstance, filter) {
+  const { cache, keys, _vnode } = keepAliveInstance
+  for (const key in cache) {
+    const cachedNode = cache[key]
+    if (cachedNode) {
+      const name = getComponentName(cachedNode.componentOptions)
+      if (name && !filter(name)) {
+        pruneCacheEntry(cache, key, keys, _vnode)
+      }
+    }
+  }
+}
+
+function pruneCacheEntry (cache,key,keys,current) {
+  const cached = cache[key]
+  if (cached && (!current || cached.tag !== current.tag)) {
+    cached.componentInstance.$destroy()
+  }
+  cache[key] = null
+  remove(keys, key)
+}
+```
+
+**为什么要删除第一个缓存组件并且为什么命中缓存了还要调整组件key的顺序？**
+
+这其实应用了一个缓存淘汰策略LRU：
+
+1. 将新数据从尾部插入到`this.keys`中；
+2. 每当缓存命中（即缓存数据被访问），则将数据移到`this.keys`的尾部；
+3. 当`this.keys`满的时候，将头部的数据丢弃；
+
+LRU的核心思想是如果数据最近被访问过，那么将来被访问的几率也更高，所以我们将命中缓存的组件`key`重新插入到`this.keys`的尾部，这样一来，`this.keys`中越往头部的数据即将来被访问几率越低，所以当缓存数量达到最大值时，我们就删除将来被访问几率最低的数据，即`this.keys`中第一个缓存的组件。这也就之前加粗强调的**已缓存组件中最久没有被访问的实例**会被销毁掉的原因所在。
+
+###### 3、生命周期
+
+组件一旦被 `<keep-alive>` 缓存，那么**再次渲染**的时候就不会执行 `created`、`mounted` 等钩子函数，但是我们很多业务场景都是希望在我们被缓存的组件再次被渲染的时候做一些事情，好在`Vue` 提供了 `activated`和`deactivated` 两个钩子函数，它的执行时机是 `<keep-alive>` 包裹的组件激活时调用和停用时调用。
+
