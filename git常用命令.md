@@ -104,6 +104,8 @@ git checkout -b <new_branch_name> origin/<remote_branch>
 git checkout . 
 # 放弃工作区和暂存区的修改，影响工作区和暂存区 
 git checkout -f
+# 放弃某个文件的更改
+git checkout <commit_id> -- <file_path>
 ```
 
 ## git status
@@ -302,6 +304,25 @@ git reset --hard commit_id
 
 # 强推到远程 
 git push origin dev --force
+```
+
+#### 已使用git add 缓存代码，未使用git commit
+
+```powershell
+# 放弃单个文件的修改
+git reset HEAD filepath
+# 放弃所有文件修改
+git reset HEAD 
+```
+
+#### 已经用 git commit 提交了代码
+
+```powershell
+# 使用 git reset --hard HEAD^ 来回退到上一次commit的状态
+git reset --hard HEAD^
+
+# 或者回退到任意版本git reset --hard commit id ，使用git log命令查看git提交历史和commit id
+git reset --hard [commit id]
 ```
 
 ## git tag 版本号管理
