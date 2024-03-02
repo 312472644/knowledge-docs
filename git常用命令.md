@@ -83,6 +83,10 @@ git push origin --delete <remote_branch_name>
 
 # 重命名当前分支
 git branch -m <new_name>
+
+# 查看当前使用分支
+git symbolic-ref --short HEAD
+git branch --show-current #需要 Git 2.22 及以上版本
 ```
 
 ## git checkout
